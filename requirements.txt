@@ -1,7 +1,7 @@
 Flask
 Flask-CORS
 numpy
-opencv-python-headless
+opencv-python
 tensorflow
 scipy
 Pillow
