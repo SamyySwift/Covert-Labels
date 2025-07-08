@@ -17,7 +17,6 @@ from io import BytesIO
 from PIL import Image
 import threading
 import time
-from vercel_blob import put, list as blob_list, delete as blob_delete
 import requests
 from urllib.parse import urlparse
 
@@ -404,7 +403,7 @@ def verify_images(image_files):
                 "orb_score": round(float(np.mean(orb_scores)) if orb_scores else 0, 3),  # Convert to Python float
                 "pattern_score": round(float(best_pattern_result['combined_score']) if best_pattern_result else 0, 3)  # Convert to Python float
             },
-            "threshold": 0.75,
+            "threshold": 0.65,
             "timestamp": datetime.now().isoformat()
         }
         
