@@ -7,6 +7,3 @@ scipy
 Pillow
 scikit-learn
 gunicorn
-requests
-setuptools
-wheel
