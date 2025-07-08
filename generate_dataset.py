@@ -13,7 +13,7 @@ AUGMENTED_AUTH_DIR = "dataset/authentic_augmented"
 FINGERPRINT_DIR = "dataset/fingerprints"
 DB_PATH = "product_db.json"
 IMG_SIZE = (224, 224)
-VIEWS_PER_IMAGE = 30
+VIEWS_PER_IMAGE = 10
 
 os.makedirs(AUTH_DIR, exist_ok=True)
 os.makedirs(FAKE_DIR, exist_ok=True)

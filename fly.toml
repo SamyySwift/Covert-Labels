@@ -1,0 +1,28 @@
+# fly.toml app configuration file generated for covert-labels on 2025-07-08T19:45:23+01:00
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
+
+app = 'covert-labels'
+primary_region = 'lhr'
+
+[build]
+
+[deploy]
+  release_command = 'mkdir -p dataset/authentic dataset/fake dataset/authentic_augmented dataset/fingerprints uploads authentic_labels'
+
+[env]
+  PORT = '8080'
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ['app']
+
+[[vm]]
+  memory = '2gb'
+  cpu_kind = 'shared'
+  cpus = 1

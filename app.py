@@ -412,11 +412,11 @@ def verify_images(image_files):
         return {"error": f"Verification failed: {str(e)}"}, 500
 
 def train_model_async():
-    """Train model in background thread"""
+    """Train model in background thread with dynamic progress"""
     global TRAINING_STATUS
     
     try:
-        TRAINING_STATUS = {"status": "training", "progress": 0, "message": "Starting dataset generation..."}
+        TRAINING_STATUS = {"status": "training", "progress": 0, "message": "Starting dataset generation...", "timestamp": datetime.now().isoformat()}
         
         # Step 1: Generate dataset first
         print("🔄 Generating dataset...")
@@ -427,45 +427,88 @@ def train_model_async():
             text=True
         )
         
-        # Wait for dataset generation to complete
         dataset_stdout, dataset_stderr = dataset_process.communicate()
         
         if dataset_process.returncode != 0:
             TRAINING_STATUS = {
                 "status": "failed", 
                 "progress": 0, 
-                "message": f"Dataset generation failed: {dataset_stderr}"
+                "message": f"Dataset generation failed: {dataset_stderr}",
+                "timestamp": datetime.now().isoformat()
             }
             return
         
-        TRAINING_STATUS = {"status": "training", "progress": 25, "message": "Dataset generated. Starting model training..."}
+        TRAINING_STATUS = {
+            "status": "training", 
+            "progress": 20, 
+            "message": "Dataset generated. Starting model training...",
+            "timestamp": datetime.now().isoformat()
+        }
         
-        # Step 2: Train the model
+        # Step 2: Train the model with real-time progress
         print("🔄 Training model...")
         training_process = subprocess.Popen(
             ["python", "train_siamese.py"],
             stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True
+            stderr=subprocess.STDOUT,  # Combine stderr with stdout
+            text=True,
+            bufsize=1,  # Line buffered
+            universal_newlines=True
         )
         
-        # Monitor training progress (simplified)
-        for i in range(1, 16):  # Assuming 15 epochs after dataset generation
-            time.sleep(10)  # Simulate training time
-            progress = 25 + (i / 15) * 75  # 25% for dataset + 75% for training
-            TRAINING_STATUS["progress"] = progress
-            TRAINING_STATUS["message"] = f"Training epoch {i}/15"
-            
-            if training_process.poll() is not None:
-                break
+        total_epochs = 10  # From train_siamese.py line 132
+        current_epoch = 0
         
-        training_stdout, training_stderr = training_process.communicate()
+        # Read output line by line for real-time progress
+        while True:
+            output = training_process.stdout.readline()
+            if output == '' and training_process.poll() is not None:
+                break
+            
+            if output:
+                print(f"Training output: {output.strip()}")  # Debug log
+                
+                # Parse epoch information from TensorFlow output
+                if "Epoch" in output and "/" in output:
+                    try:
+                        # Look for patterns like "Epoch 1/10" or "Epoch 3/10"
+                        import re
+                        epoch_match = re.search(r'Epoch (\d+)/(\d+)', output)
+                        if epoch_match:
+                            current_epoch = int(epoch_match.group(1))
+                            total_epochs = int(epoch_match.group(2))
+                            
+                            # Calculate progress: 20% for dataset + 80% for training
+                            training_progress = (current_epoch / total_epochs) * 80
+                            total_progress = 20 + training_progress
+                            
+                            TRAINING_STATUS = {
+                                "status": "training",
+                                "progress": round(total_progress, 1),
+                                "message": f"Training epoch {current_epoch}/{total_epochs}",
+                                "timestamp": datetime.now().isoformat()
+                            }
+                    except (ValueError, AttributeError):
+                        pass  # Skip if parsing fails
+                
+                # Look for completion indicators
+                elif "model trained and saved" in output.lower() or "✅" in output:
+                    TRAINING_STATUS = {
+                        "status": "training",
+                        "progress": 95,
+                        "message": "Model saved. Finalizing...",
+                        "timestamp": datetime.now().isoformat()
+                    }
+        
+        # Wait for process to complete
+        training_process.wait()
         
         if training_process.returncode == 0:
             TRAINING_STATUS = {
                 "status": "completed", 
                 "progress": 100, 
-                "message": "Training completed successfully"
+                "message": "Training completed successfully",
+                "timestamp": datetime.now().isoformat()
             }
             # Reload model
             global model
@@ -473,15 +516,17 @@ def train_model_async():
         else:
             TRAINING_STATUS = {
                 "status": "failed", 
-                "progress": 0, 
-                "message": f"Training failed: {training_stderr}"
+                "progress": TRAINING_STATUS.get("progress", 20), 
+                "message": "Training failed - check logs for details",
+                "timestamp": datetime.now().isoformat()
             }
             
     except Exception as e:
         TRAINING_STATUS = {
             "status": "failed", 
             "progress": 0, 
-            "message": f"Training error: {str(e)}"
+            "message": f"Training error: {str(e)}",
+            "timestamp": datetime.now().isoformat()
         }
 
 # =====================
@@ -686,6 +731,7 @@ if __name__ == '__main__':
     print("🚀 Starting Label Authentication API...")
     print(f"📊 Model loaded: {model is not None}")
     print(f"📦 Products in database: {len(product_db)}")
-    # Use environment variable for port, default to 3000 for local dev
+    
+    # Use PORT environment variable (Fly.io sets this to 8080)
     port = int(os.environ.get('PORT', 3000))
     app.run(host='0.0.0.0', port=port, debug=False)
