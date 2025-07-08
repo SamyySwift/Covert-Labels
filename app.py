@@ -31,6 +31,7 @@ FINGERPRINT_DIR = "dataset/fingerprints"
 DB_PATH = "product_db.json"
 MODEL_PATH = "siamese_contrastive.keras"
 UPLOAD_FOLDER = "uploads"
+AUTHENTIC_LABELS_DIR = "authentic_labels"
 TRAINING_STATUS = {"status": "idle", "progress": 0, "message": ""}
 
 # Ensure upload directory exists
@@ -590,20 +591,20 @@ def upload_labels():
                 timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
                 filename = f"{batch_id}_{timestamp}_{file.filename}"
                 
-                # Save to Vercel Blob
-                blob_url = save_to_blob(file_data, filename, "authentic_labels")
+                # Save to local storage
+                file_path = save_uploaded_file(file_data, filename, AUTHENTIC_LABELS_DIR)
                 
-                if blob_url:
+                if file_path:
                     uploaded_files.append({
                         'filename': filename,
-                        'blob_url': blob_url,
+                        'file_path': file_path,
                         'batch_id': batch_id,
                         'product_name': product_name,
                         'sku': sku
                     })
         
-        # Update product database (store in blob)
-        update_product_database_blob(batch_id, product_name, sku, uploaded_files)
+        # Update product database
+        update_product_database(batch_id, product_name, sku, uploaded_files)
         
         return jsonify({
             'message': f'Successfully uploaded {len(uploaded_files)} images',
@@ -613,6 +614,55 @@ def upload_labels():
         
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+def update_product_database(batch_id, product_name, sku, files):
+    """Update product database stored locally"""
+    try:
+        # Load existing database
+        if os.path.exists(DB_PATH):
+            with open(DB_PATH, 'r') as f:
+                product_db = json.load(f)
+        else:
+            product_db = {}
+        
+        # Update database
+        if batch_id not in product_db:
+            product_db[batch_id] = {
+                'product_name': product_name,
+                'sku': sku,
+                'created_at': datetime.now().isoformat(),
+                'files': []
+            }
+        
+        product_db[batch_id]['files'].extend(files)
+        
+        # Save updated database
+        with open(DB_PATH, 'w') as f:
+            json.dump(product_db, f, indent=2)
+        
+    except Exception as e:
+        print(f"Error updating product database: {e}")
+
+# Replace blob functions with local file storage
+def save_uploaded_file(file_data, filename, folder="uploads"):
+    """Save file data to local storage"""
+    try:
+        folder_path = os.path.join(folder)
+        os.makedirs(folder_path, exist_ok=True)
+        
+        file_path = os.path.join(folder_path, filename)
+        
+        if isinstance(file_data, bytes):
+            with open(file_path, 'wb') as f:
+                f.write(file_data)
+        else:
+            with open(file_path, 'w') as f:
+                f.write(file_data)
+        
+        return file_path
+    except Exception as e:
+        print(f"Error saving file: {e}")
+        return None
 
 def update_product_database_blob(batch_id, product_name, sku, files):
     """Update product database stored in Vercel Blob"""

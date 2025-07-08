@@ -1,10 +1,12 @@
 Flask
 Flask-CORS
 numpy
-opencv-python
+opencv-python-headless
 tensorflow
 scipy
 Pillow
 scikit-learn
 gunicorn
-vercel_blob
+requests
+setuptools
+wheel
