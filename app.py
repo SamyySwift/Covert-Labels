@@ -566,6 +566,11 @@ def upload_labels():
         if not batch_id:
             return jsonify({'error': 'batch_id is required'}), 400
         
+        # Create the dataset/authentic structure
+        AUTH_DIR = "dataset/authentic"
+        batch_path = os.path.join(AUTH_DIR, batch_id)
+        os.makedirs(batch_path, exist_ok=True)
+        
         uploaded_files = []
         
         for file in files:
@@ -573,33 +578,58 @@ def upload_labels():
                 # Read file data
                 file_data = file.read()
                 
-                # Generate unique filename
-                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-                filename = f"{batch_id}_{timestamp}_{file.filename}"
+                # Use original filename (no timestamp prefix needed)
+                filename = file.filename
+                file_path = os.path.join(batch_path, filename)
                 
-                # Save to local storage
-                file_path = save_uploaded_file(file_data, filename, AUTHENTIC_LABELS_DIR)
+                # Save directly to the batch folder
+                with open(file_path, 'wb') as f:
+                    f.write(file_data)
                 
-                if file_path:
-                    uploaded_files.append({
-                        'filename': filename,
-                        'file_path': file_path,
-                        'batch_id': batch_id,
-                        'product_name': product_name,
-                        'sku': sku
-                    })
+                uploaded_files.append({
+                    'filename': filename,
+                    'file_path': file_path,
+                    'batch_id': batch_id,
+                    'product_name': product_name,
+                    'sku': sku
+                })
         
-        # Update product database
-        update_product_database(batch_id, product_name, sku, uploaded_files)
+        # Update product database to match generate_dataset.py format
+        update_product_database_local(batch_id, product_name, sku, uploaded_files)
         
         return jsonify({
-            'message': f'Successfully uploaded {len(uploaded_files)} images',
+            'message': f'Successfully uploaded {len(uploaded_files)} images to batch {batch_id}',
             'batch_id': batch_id,
-            'uploaded_files': len(uploaded_files)
+            'uploaded_files': len(uploaded_files),
+            'batch_path': batch_path
         })
         
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+def update_product_database_local(batch_id, product_name, sku, files):
+    """Update product database to match generate_dataset.py format"""
+    DB_PATH = "product_db.json"
+    
+    # Load existing database
+    if os.path.exists(DB_PATH):
+        with open(DB_PATH, 'r') as f:
+            product_db = json.load(f)
+    else:
+        product_db = {}
+    
+    # Add or update batch entry
+    product_db[batch_id] = {
+        "batch_id": batch_id,
+        "product_name": product_name.replace("_", " ").title(),
+        "sku": sku,
+        "created_at": datetime.now().isoformat(),
+        "image_count": len(files)
+    }
+    
+    # Save updated database
+    with open(DB_PATH, 'w') as f:
+        json.dump(product_db, f, indent=2)
 
 def update_product_database(batch_id, product_name, sku, files):
     """Update product database stored locally"""
