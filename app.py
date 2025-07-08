@@ -17,6 +17,9 @@ from io import BytesIO
 from PIL import Image
 import threading
 import time
+from vercel_blob import put, list as blob_list, delete as blob_delete
+import requests
+from urllib.parse import urlparse
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for frontend integration
@@ -560,56 +563,202 @@ def get_batches():
     except Exception as e:
         return jsonify({"error": f"Failed to get batches: {str(e)}"}), 500
 
+
+
 @app.route('/api/upload-labels', methods=['POST'])
 def upload_labels():
-    """Upload new label images for training"""
     try:
         if 'images' not in request.files:
-            return jsonify({"error": "No images provided"}), 400
+            return jsonify({'error': 'No images provided'}), 400
         
         files = request.files.getlist('images')
         batch_id = request.form.get('batch_id')
-        product_name = request.form.get('product_name')
-        sku = request.form.get('sku')
+        product_name = request.form.get('product_name', 'unknown')
+        sku = request.form.get('sku', 'unknown')
         
-        if not batch_id or not product_name:
-            return jsonify({"error": "batch_id and product_name are required"}), 400
+        if not batch_id:
+            return jsonify({'error': 'batch_id is required'}), 400
         
-        # Create batch directory
-        batch_dir = os.path.join("dataset/authentic", batch_id)
-        os.makedirs(batch_dir, exist_ok=True)
+        uploaded_files = []
         
-        # Save uploaded images
-        saved_files = []
-        for i, file in enumerate(files):
-            if file.filename:
-                filename = f"{batch_id}_view{i}.jpg"
-                filepath = os.path.join(batch_dir, filename)
-                file.save(filepath)
-                saved_files.append(filename)
+        for file in files:
+            if file and file.filename:
+                # Read file data
+                file_data = file.read()
+                
+                # Generate unique filename
+                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                filename = f"{batch_id}_{timestamp}_{file.filename}"
+                
+                # Save to Vercel Blob
+                blob_url = save_to_blob(file_data, filename, "authentic_labels")
+                
+                if blob_url:
+                    uploaded_files.append({
+                        'filename': filename,
+                        'blob_url': blob_url,
+                        'batch_id': batch_id,
+                        'product_name': product_name,
+                        'sku': sku
+                    })
         
-        # Update product database
-        product_db[batch_id] = {
-            "batch_id": batch_id,
-            "product_name": product_name,
-            "sku": sku or "",
-            "created_at": datetime.now().isoformat(),
-            "image_count": len(saved_files)
-        }
-        
-        # Save updated database
-        with open(DB_PATH, 'w') as f:
-            json.dump(product_db, f, indent=2)
+        # Update product database (store in blob)
+        update_product_database_blob(batch_id, product_name, sku, uploaded_files)
         
         return jsonify({
-            "message": "Labels uploaded successfully",
-            "batch_id": batch_id,
-            "files_saved": len(saved_files),
-            "files": saved_files
+            'message': f'Successfully uploaded {len(uploaded_files)} images',
+            'batch_id': batch_id,
+            'uploaded_files': len(uploaded_files)
         })
         
     except Exception as e:
-        return jsonify({"error": f"Upload failed: {str(e)}"}), 500
+        return jsonify({'error': str(e)}), 500
+
+def update_product_database_blob(batch_id, product_name, sku, files):
+    """Update product database stored in Vercel Blob"""
+    try:
+        # Try to load existing database
+        db_blobs = blob_list()
+        db_blob = next((b for b in db_blobs['blobs'] if b['pathname'] == 'product_db.json'), None)
+        
+        if db_blob:
+            db_content = load_from_blob(db_blob['url'])
+            product_db = json.loads(db_content.decode('utf-8')) if db_content else {}
+        else:
+            product_db = {}
+        
+        # Update database
+        if batch_id not in product_db:
+            product_db[batch_id] = {
+                'product_name': product_name,
+                'sku': sku,
+                'created_at': datetime.now().isoformat(),
+                'files': []
+            }
+        
+        product_db[batch_id]['files'].extend(files)
+        
+        # Save updated database to blob
+        db_json = json.dumps(product_db, indent=2)
+        save_to_blob(db_json.encode('utf-8'), 'product_db.json', '')
+        
+    except Exception as e:
+        print(f"Error updating product database: {e}")
+
+# Replace file storage functions with Blob storage
+def save_to_blob(file_data, filename, folder="uploads"):
+    """Save file data to Vercel Blob storage"""
+    try:
+        blob_path = f"{folder}/{filename}"
+        result = put(blob_path, file_data, {
+            'access': 'public',
+            'content_type': 'image/jpeg'
+        })
+        return result['url']
+    except Exception as e:
+        print(f"Error saving to blob: {e}")
+        return None
+
+def load_from_blob(blob_url):
+    """Load file data from Vercel Blob storage"""
+    try:
+        response = requests.get(blob_url)
+        if response.status_code == 200:
+            return response.content
+        return None
+    except Exception as e:
+        print(f"Error loading from blob: {e}")
+        return None
+
+def list_blob_files(folder="uploads"):
+    """List files in Vercel Blob storage"""
+    try:
+        blobs = blob_list()
+        return [blob for blob in blobs['blobs'] if blob['pathname'].startswith(folder)]
+    except Exception as e:
+        print(f"Error listing blobs: {e}")
+        return []
+
+# Update upload_labels endpoint
+@app.route('/api/upload-labels', methods=['POST'])
+def upload_labels():
+    try:
+        if 'images' not in request.files:
+            return jsonify({'error': 'No images provided'}), 400
+        
+        files = request.files.getlist('images')
+        batch_id = request.form.get('batch_id')
+        product_name = request.form.get('product_name', 'unknown')
+        sku = request.form.get('sku', 'unknown')
+        
+        if not batch_id:
+            return jsonify({'error': 'batch_id is required'}), 400
+        
+        uploaded_files = []
+        
+        for file in files:
+            if file and file.filename:
+                # Read file data
+                file_data = file.read()
+                
+                # Generate unique filename
+                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                filename = f"{batch_id}_{timestamp}_{file.filename}"
+                
+                # Save to Vercel Blob
+                blob_url = save_to_blob(file_data, filename, "authentic_labels")
+                
+                if blob_url:
+                    uploaded_files.append({
+                        'filename': filename,
+                        'blob_url': blob_url,
+                        'batch_id': batch_id,
+                        'product_name': product_name,
+                        'sku': sku
+                    })
+        
+        # Update product database (store in blob)
+        update_product_database_blob(batch_id, product_name, sku, uploaded_files)
+        
+        return jsonify({
+            'message': f'Successfully uploaded {len(uploaded_files)} images',
+            'batch_id': batch_id,
+            'uploaded_files': len(uploaded_files)
+        })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+def update_product_database_blob(batch_id, product_name, sku, files):
+    """Update product database stored in Vercel Blob"""
+    try:
+        # Try to load existing database
+        db_blobs = blob_list()
+        db_blob = next((b for b in db_blobs['blobs'] if b['pathname'] == 'product_db.json'), None)
+        
+        if db_blob:
+            db_content = load_from_blob(db_blob['url'])
+            product_db = json.loads(db_content.decode('utf-8')) if db_content else {}
+        else:
+            product_db = {}
+        
+        # Update database
+        if batch_id not in product_db:
+            product_db[batch_id] = {
+                'product_name': product_name,
+                'sku': sku,
+                'created_at': datetime.now().isoformat(),
+                'files': []
+            }
+        
+        product_db[batch_id]['files'].extend(files)
+        
+        # Save updated database to blob
+        db_json = json.dumps(product_db, indent=2)
+        save_to_blob(db_json.encode('utf-8'), 'product_db.json', '')
+        
+    except Exception as e:
+        print(f"Error updating product database: {e}")
 
 if __name__ == '__main__':
     print("🚀 Starting Label Authentication API...")
