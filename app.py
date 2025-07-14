@@ -272,6 +272,107 @@ def detect_texture_signature(img, expected_batch_id):
         print(f"Texture detection error: {e}")
         return 0.0
 
+def add_invisible_microdots(img, batch_id, dot_count=10):
+    """Add exactly 10 slightly visible microdots for authentication"""
+    h, w = img.shape[:2]
+    batch_hash = hash(batch_id) % 1000
+    np.random.seed(batch_hash)
+    
+    # Generate exactly 10 dot positions
+    coords = []
+    for _ in range(dot_count):
+        x = np.random.randint(20, w - 20)  # Keep dots away from edges
+        y = np.random.randint(20, h - 20)
+        coords.append((x, y))
+    
+    # Slightly visible dots that still blend reasonably with background
+    dot_radius = 2
+    
+    # Draw dots that are slightly darker/lighter than background
+    for (x, y) in coords:
+        # Sample the local background color in a 5x5 area
+        y1, y2 = max(0, y-2), min(h, y+3)
+        x1, x2 = max(0, x-2), min(w, x+3)
+        local_region = img[y1:y2, x1:x2]
+        
+        # Calculate average color of the local area
+        if len(img.shape) == 3:  # Color image
+            avg_color = np.mean(local_region, axis=(0, 1))
+            # Add more noticeable variation (±8 to ±12) to make dots slightly visible
+            variation = np.random.randint(-12, -8) if np.random.random() > 0.5 else np.random.randint(8, 13)
+            dot_color = tuple(int(np.clip(c + variation, 0, 255)) for c in avg_color)
+        else:  # Grayscale image
+            avg_color = np.mean(local_region)
+            variation = np.random.randint(-12, -8) if np.random.random() > 0.5 else np.random.randint(8, 13)
+            dot_color = int(np.clip(avg_color + variation, 0, 255))
+        
+        cv2.circle(img, (x, y), dot_radius, dot_color, -1)
+    
+    return img
+
+def add_print_resistant_patterns(img, batch_id):
+    """Add patterns that survive print/camera lifecycle - microdots only"""
+    
+    # 1. Invisible watermark (most reliable)
+    img = add_robust_watermark(img, batch_id)
+    
+    # 2. Removed texture signatures completely
+    # img = add_texture_signature(img, batch_id)  # REMOVED
+    
+    # 3. Invisible microdots with exactly 10 dots
+    img = add_invisible_microdots(img, batch_id, dot_count=10)
+    
+    return img
+
+def add_robust_watermark(img, batch_id):
+    """Watermark optimized for print/scan survival"""
+    h, w = img.shape[:2]
+    batch_hash = hash(batch_id) % 1000
+    np.random.seed(batch_hash)
+    
+    # Larger blocks for print durability
+    block_size = 12  # Increased from 8 for better print survival
+    
+    for y in range(0, h, block_size):
+        for x in range(0, w, block_size):
+            if np.random.random() > 0.6:  # 40% of blocks
+                # Stronger variation for print survival
+                variation = np.random.choice([-4, -3, 3, 4])  # Increased from ±2
+                
+                img[y:y+block_size, x:x+block_size] = np.clip(
+                    img[y:y+block_size, x:x+block_size].astype(np.int16) + variation,
+                    0, 255
+                ).astype(np.uint8)
+    
+    return img
+
+def add_texture_signature(img, batch_id):
+    """Texture patterns optimized for print/camera - completely invisible"""
+    h, w = img.shape[:2]
+    batch_hash = hash(batch_id) % 1000
+    np.random.seed(batch_hash)
+    
+    # Much smaller kernel for completely invisible effect
+    kernel_size = 3
+    # Extremely subtle texture kernel - barely perceptible
+    texture_kernel = np.random.uniform(-0.01, 0.01, (kernel_size, kernel_size))  # Reduced from -0.05, 0.05
+    texture_kernel = texture_kernel / np.sum(np.abs(texture_kernel))
+    
+    # Fewer regions with extremely weak effect
+    num_regions = 10  # Reduced from 15
+    for _ in range(num_regions):
+        y = np.random.randint(0, h - kernel_size)
+        x = np.random.randint(0, w - kernel_size)
+        
+        region = img[y:y+kernel_size, x:x+kernel_size].astype(np.float32)
+        # Apply extremely weak texture effect
+        textured = cv2.filter2D(region, -1, texture_kernel * 0.1)  # Much weaker (reduced from * 0.5)
+        # Ensure values stay within bounds and convert back to uint8
+        result = np.clip(textured, 0, 255).astype(np.uint8)
+        img[y:y+kernel_size, x:x+kernel_size] = result
+    
+    return img
+
 def detect_print_resistant_patterns(img, expected_batch_id):
     """Combined print-resistant pattern detection"""
     watermark_score = detect_robust_watermark(img, expected_batch_id)
@@ -617,19 +718,33 @@ def upload_labels():
         os.makedirs(batch_path, exist_ok=True)
         
         uploaded_files = []
+        modified_images = []
         
         for file in files:
             if file and file.filename:
                 # Read file data
                 file_data = file.read()
                 
+                # Convert to OpenCV image for processing
+                nparr = np.frombuffer(file_data, np.uint8)
+                img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+                
+                if img is None:
+                    continue
+                
+                # Apply badge-specific micro pattern embedding
+                modified_img = add_print_resistant_patterns(img.copy(), batch_id)
+                
+                # Convert modified image to base64 for response
+                _, buffer = cv2.imencode('.jpg', modified_img)
+                modified_img_base64 = base64.b64encode(buffer).decode('utf-8')
+                
                 # Use original filename (no timestamp prefix needed)
                 filename = file.filename
                 file_path = os.path.join(batch_path, filename)
                 
-                # Save directly to the batch folder
-                with open(file_path, 'wb') as f:
-                    f.write(file_data)
+                # Save the modified image to the batch folder
+                cv2.imwrite(file_path, modified_img)
                 
                 uploaded_files.append({
                     'filename': filename,
@@ -637,6 +752,11 @@ def upload_labels():
                     'batch_id': batch_id,
                     'product_name': product_name,
                     'sku': sku
+                })
+                
+                modified_images.append({
+                    'filename': filename,
+                    'modified_image': modified_img_base64
                 })
         
         # Update product database to match generate_dataset.py format
@@ -646,7 +766,8 @@ def upload_labels():
             'message': f'Successfully uploaded {len(uploaded_files)} images to batch {batch_id}',
             'batch_id': batch_id,
             'uploaded_files': len(uploaded_files),
-            'batch_path': batch_path
+            'batch_path': batch_path,
+            'modified_images': modified_images
         })
         
     except Exception as e:

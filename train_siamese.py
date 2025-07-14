@@ -80,9 +80,10 @@ train_pairs, val_pairs, train_labels, val_labels = train_test_split(
 
 print(f"Training: {len(train_pairs)} pairs, Validation: {len(val_pairs)} pairs")
 
-# Create datasets
-train_dataset = create_dataset_from_pairs(train_pairs, train_labels, batch_size=4)  # Reduced from 16
-val_dataset = create_dataset_from_pairs(val_pairs, val_labels, batch_size=4)       # Reduced from 16
+
+# GPU optimized:
+train_dataset = create_dataset_from_pairs(train_pairs, train_labels, batch_size=8)
+val_dataset = create_dataset_from_pairs(val_pairs, val_labels, batch_size=8)
 
 # =========================
 # Build Siamese Network
@@ -129,7 +130,7 @@ early_stop = EarlyStopping(monitor='val_loss', patience=3, restore_best_weights=
 history = model.fit(
     train_dataset,
     validation_data=val_dataset,
-    epochs=5,  # Reduced from 20
+    epochs=10, 
     callbacks=[early_stop]
 )
 

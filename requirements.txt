@@ -1,8 +1,9 @@
+# Replace tensorflow[and-cuda] with:
+tensorflow
 Flask
 Flask-CORS
 numpy
 opencv-python-headless
-tensorflow
 scipy
 Pillow
 scikit-learn
