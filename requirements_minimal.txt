@@ -1,7 +1,0 @@
-Flask
-tensorflow
-Pillow
-numpy
-openai
-python-dotenv
-gunicorn

@@ -1,11 +1,7 @@
-# Replace tensorflow[and-cuda] with:
-tensorflow
 Flask
-Flask-CORS
-numpy
-opencv-python-headless
-scipy
+tensorflow
 Pillow
-scikit-learn
+numpy
+openai
+python-dotenv
 gunicorn
-requests
