@@ -6,3 +6,4 @@ openai
 python-dotenv
 gunicorn
 flask-cors
+opencv-python
