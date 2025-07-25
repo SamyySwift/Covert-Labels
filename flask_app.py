@@ -7,6 +7,7 @@ from tensorflow.keras.applications.efficientnet import preprocess_input
 import base64
 from openai import OpenAI
 from flask import Flask, request, jsonify
+from flask_cors import CORS
 from dotenv import load_dotenv
 import io
 
@@ -14,6 +15,7 @@ import io
 load_dotenv()
 
 app = Flask(__name__)
+CORS(app)  # Enable CORS for all routes
 
 # --- Config ---
 IMG_SIZE = (224, 224)
