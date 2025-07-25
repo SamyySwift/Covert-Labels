@@ -9,15 +9,25 @@ from tensorflow.keras.utils import register_keras_serializable
 from sklearn.model_selection import train_test_split
 import cv2
 from tensorflow.keras.applications.mobilenet_v2 import preprocess_input
+import os
+
+
+os.makedirs("app/models", exist_ok=True)
 
 # Custom functions
 @register_keras_serializable()
 def contrastive_loss(y_true, y_pred):
-    margin = 1.0
-    return tf.reduce_mean(
-        y_true * tf.square(y_pred) + 
-        (1 - y_true) * tf.square(tf.maximum(margin - y_pred, 0))
-    )
+    margin = 1.5  # Increased margin from 1.0
+    y_true = tf.cast(y_true, tf.float32)
+    
+    # Add small epsilon to prevent numerical instability
+    epsilon = 1e-6
+    y_pred = tf.clip_by_value(y_pred, epsilon, 1.0 - epsilon)
+    
+    positive_loss = y_true * tf.square(y_pred)
+    negative_loss = (1 - y_true) * tf.square(tf.maximum(margin - y_pred, 0))
+    
+    return tf.reduce_mean(positive_loss + negative_loss)
 
 @register_keras_serializable()
 def l2_normalize(x):
@@ -40,7 +50,7 @@ def load_and_preprocess_image(img_path):
     img = preprocess_input(img.astype('float32'))
     return img
 
-def create_dataset_from_pairs(pairs, labels, batch_size=4):  # Reduced from 16
+def create_dataset_from_pairs(pairs, labels, batch_size=8):  # Reduced from 16
     def data_generator():
         for i in range(len(pairs)):
             pair = pairs[i]
@@ -115,7 +125,12 @@ def build_siamese_model():
 
 model = build_siamese_model()
 
-lr_schedule = ExponentialDecay(initial_learning_rate=1e-3, decay_steps=500, decay_rate=0.95)
+# More aggressive learning rate schedule
+lr_schedule = ExponentialDecay(
+    initial_learning_rate=5e-4,  # Reduced from 1e-3
+    decay_steps=200,             # Reduced from 500 for faster decay
+    decay_rate=0.9               # Reduced from 0.95 for more aggressive decay
+)
 
 model.compile(
     optimizer=tf.keras.optimizers.Adam(learning_rate=lr_schedule),
@@ -134,5 +149,5 @@ history = model.fit(
     callbacks=[early_stop]
 )
 
-model.save("siamese_contrastive.keras")
-print("✅ Contrastive model trained and saved to siamese_contrastive.keras")
+model.save("app/models/siamese_contrastive.keras")
+print("✅ Contrastive model trained and saved to app/models/siamese_contrastive.keras")

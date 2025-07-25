@@ -16,10 +16,16 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
+# Create models directory for volume mounting
+RUN mkdir -p /app/models
+
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
+
+# Declare volume for model persistence
+VOLUME ["/app/models"]
 
 EXPOSE 8080
 

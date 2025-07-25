@@ -17,23 +17,43 @@ from io import BytesIO
 from PIL import Image
 import threading
 import time
+import requests  # Add this import
 
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for frontend integration
 
-# Configuration
-IMG_SIZE = (224, 224)
-AUGMENTED_AUTH_DIR = "dataset/authentic_augmented"
-FINGERPRINT_DIR = "dataset/fingerprints"
-DB_PATH = "product_db.json"
-MODEL_PATH = "siamese_contrastive.keras"
-UPLOAD_FOLDER = "uploads"
-AUTHENTIC_LABELS_DIR = "authentic_labels"
-TRAINING_STATUS = {"status": "idle", "progress": 0, "message": ""}
+# Webhook configuration - Move to top
+WEBHOOK_URL = "https://sartor-server-beta.onrender.com/api/v1/label/webhook"
+WEBHOOK_TOKEN = "68543ef834267d53d9159dfa5fbfa997053152739e2519a50416742da4c4c31b"
 
-# Ensure upload directory exists
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+def send_webhook_notification(label_id, status):
+    """Send webhook notification when training completes or fails"""
+    try:
+        headers = {
+            's-token': WEBHOOK_TOKEN,
+            'Content-Type': 'application/json'
+        }
+        
+        payload = {
+            'label_id': label_id,
+            'status': status
+        }
+        
+        response = requests.post(
+            WEBHOOK_URL,
+            json=payload,
+            headers=headers,
+            timeout=30
+        )
+        
+        if response.status_code == 200:
+            print(f"✅ Webhook notification sent successfully for label_id: {label_id}, status: {status}")
+        else:
+            print(f"❌ Webhook notification failed. Status: {response.status_code}, Response: {response.text}")
+            
+    except Exception as e:
+        print(f"❌ Error sending webhook notification: {str(e)}")
 
 # =====================
 # Register Custom Parts
@@ -55,26 +75,68 @@ def euclidean_distance(tensors):
     a, b = tensors
     return tf.norm(a - b, axis=1, keepdims=True)
 
+# Configuration
+IMG_SIZE = (224, 224)
+AUGMENTED_AUTH_DIR = "dataset/authentic_augmented"
+FINGERPRINT_DIR = "dataset/fingerprints"
+DB_PATH = "product_db.json"
+# Update model paths to use the persistent volume
+MODEL_PATH = "app/models/siamese_contrastive.keras"
+FALLBACK_MODEL_PATH = "siamese_contrastive.keras"  # Fallback to local if volume not available
+
 # =====================
 # Load Model and Database
 # =====================
 def load_model_and_db():
+    global product_db
+    
+    # Try to load from persistent volume first
+    model_path = MODEL_PATH if os.path.exists(MODEL_PATH) else FALLBACK_MODEL_PATH
+    
+    if os.path.exists(model_path):
+        try:
+            model = tf.keras.models.load_model(
+                model_path,
+                custom_objects={
+                    'contrastive_loss': contrastive_loss,
+                    'l2_normalize': l2_normalize,
+                    'euclidean_distance': euclidean_distance
+                }
+            )
+            print(f"✅ Siamese model loaded from {model_path}")
+        except Exception as e:
+            print(f"❌ Error loading model: {e}")
+            model = None
+    else:
+        print("⚠️ No trained model found")
+        model = None
+    
+    # Load product database
     try:
-        model = load_model(MODEL_PATH, custom_objects={
-            "contrastive_loss": contrastive_loss,
-            "l2_normalize": l2_normalize,
-            "euclidean_distance": euclidean_distance
-        })
-        
         with open(DB_PATH, "r") as f:
             product_db = json.load(f)
-            
-        return model, product_db
     except Exception as e:
-        print(f"Error loading model or database: {e}")
-        return None, {}
+        print(f"Error loading database: {e}")
+        product_db = {}
+    
+    return model, product_db
 
+# Initialize model and database
 model, product_db = load_model_and_db()
+
+UPLOAD_FOLDER = "uploads"
+AUTHENTIC_LABELS_DIR = "authentic_labels"
+TRAINING_STATUS = {
+    "status": "idle", 
+    "progress": 0, 
+    "message": "",
+    "label_id": None
+}
+
+# Ensure upload directory exists
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
+
 
 # =====================
 # Helper Functions
@@ -149,50 +211,25 @@ def detect_robust_watermark(img, expected_batch_id):
         preprocessed = preprocess_scanned_image(img)
         h, w = preprocessed.shape
         
-        # Generate expected pattern based on batch ID
         batch_hash = hash(expected_batch_id) % 1000000
         np.random.seed(batch_hash)
         
-        # Create smaller blocks for better print resistance
-        block_size = 16  # Increased from 8 for better print durability
-        pattern_strength = 15  # Increased strength
+        block_size = 8  # Match the embedding block size
         
         expected_pattern = np.zeros((h, w), dtype=np.float32)
         for y in range(0, h - block_size, block_size):
             for x in range(0, w - block_size, block_size):
-                if np.random.random() > 0.5:
-                    expected_pattern[y:y+block_size, x:x+block_size] = pattern_strength
+                if np.random.random() > 0.5:  # Match embedding probability
+                    variation = np.random.choice([-3, -2, 2, 3])  # REDUCED from ±12
+                    expected_pattern[y:y+block_size, x:x+block_size] = variation
         
-        # Multiple correlation methods for robustness
-        correlations = []
+        # More sensitive correlation
+        correlation = cv2.matchTemplate(preprocessed.astype(np.float32), expected_pattern, cv2.TM_CCOEFF_NORMED)
+        max_corr = np.max(correlation)
         
-        # Method 1: Template matching
-        result = cv2.matchTemplate(preprocessed.astype(np.float32), 
-                                 expected_pattern.astype(np.float32), 
-                                 cv2.TM_CCOEFF_NORMED)
-        correlations.append(np.max(result))
-        
-        # Method 2: Frequency domain analysis
-        f_img = np.fft.fft2(preprocessed)
-        f_pattern = np.fft.fft2(expected_pattern)
-        correlation_freq = np.fft.ifft2(f_img * np.conj(f_pattern))
-        correlations.append(np.abs(correlation_freq).max() / (h * w))
-        
-        # Method 3: Adaptive thresholding correlation
-        thresh_img = cv2.adaptiveThreshold(preprocessed, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2)
-        thresh_pattern = cv2.adaptiveThreshold((expected_pattern * 255).astype(np.uint8), 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2)
-        
-        correlation_adaptive = cv2.matchTemplate(thresh_img.astype(np.float32), thresh_pattern.astype(np.float32), cv2.TM_CCOEFF_NORMED)
-        correlations.append(np.max(correlation_adaptive))
-        
-        # Combine correlations with weights
-        weights = [0.4, 0.3, 0.3]
-        final_score = sum(w * c for w, c in zip(weights, correlations))
-        
-        # Amplify score for better discrimination
-        amplified_score = min(1.0, final_score * 2.5)
-        
-        return max(0.0, amplified_score)
+        # Lower threshold for better detection
+        score = max(0, min(1, (max_corr + 0.3) * 2))  # Adjusted scoring
+        return score
         
     except Exception as e:
         print(f"Watermark detection error: {e}")
@@ -325,19 +362,19 @@ def add_print_resistant_patterns(img, batch_id):
     return img
 
 def add_robust_watermark(img, batch_id):
-    """Watermark optimized for print/scan survival"""
+    """Watermark optimized for print/scan survival - REDUCED STRENGTH"""
     h, w = img.shape[:2]
     batch_hash = hash(batch_id) % 1000
     np.random.seed(batch_hash)
     
-    # Larger blocks for print durability
-    block_size = 12  # Increased from 8 for better print survival
+    # Smaller blocks for finer detail
+    block_size = 8
     
     for y in range(0, h, block_size):
         for x in range(0, w, block_size):
-            if np.random.random() > 0.6:  # 40% of blocks
-                # Stronger variation for print survival
-                variation = np.random.choice([-4, -3, 3, 4])  # Increased from ±2
+            if np.random.random() > 0.5:  # 50% of blocks
+                # MUCH GENTLER variation - reduced from ±12 to ±3
+                variation = np.random.choice([-3, -2, 2, 3])  # REDUCED STRENGTH
                 
                 img[y:y+block_size, x:x+block_size] = np.clip(
                     img[y:y+block_size, x:x+block_size].astype(np.int16) + variation,
@@ -347,26 +384,26 @@ def add_robust_watermark(img, batch_id):
     return img
 
 def add_texture_signature(img, batch_id):
-    """Texture patterns optimized for print/camera - completely invisible"""
+    """Texture patterns optimized for print/camera - REDUCED STRENGTH"""
     h, w = img.shape[:2]
     batch_hash = hash(batch_id) % 1000
     np.random.seed(batch_hash)
     
-    # Much smaller kernel for completely invisible effect
-    kernel_size = 3
-    # Extremely subtle texture kernel - barely perceptible
-    texture_kernel = np.random.uniform(-0.01, 0.01, (kernel_size, kernel_size))  # Reduced from -0.05, 0.05
+    # Smaller kernel for subtlety
+    kernel_size = 3  # Reduced from 5
+    # MUCH gentler texture kernel
+    texture_kernel = np.random.uniform(-0.02, 0.02, (kernel_size, kernel_size))  # Reduced from ±0.08
     texture_kernel = texture_kernel / np.sum(np.abs(texture_kernel))
     
-    # Fewer regions with extremely weak effect
-    num_regions = 10  # Reduced from 15
+    # Fewer regions for subtlety
+    num_regions = 10  # Reduced from 25
     for _ in range(num_regions):
         y = np.random.randint(0, h - kernel_size)
         x = np.random.randint(0, w - kernel_size)
         
         region = img[y:y+kernel_size, x:x+kernel_size].astype(np.float32)
-        # Apply extremely weak texture effect
-        textured = cv2.filter2D(region, -1, texture_kernel * 0.1)  # Much weaker (reduced from * 0.5)
+        # Apply gentler texture effect
+        textured = cv2.filter2D(region, -1, texture_kernel * 2)  # Much gentler effect
         # Ensure values stay within bounds and convert back to uint8
         result = np.clip(textured, 0, 255).astype(np.uint8)
         img[y:y+kernel_size, x:x+kernel_size] = result
@@ -478,7 +515,7 @@ def verify_images(image_files):
             orb_avg = float(np.mean(orb_scores))  # Convert to Python float
             pattern_avg = float(np.mean(pattern_scores))  # Convert to Python float
             
-            combined_score = 0.4 * siamese_avg + 0.3 * orb_avg + 0.3 * pattern_avg
+            combined_score = 0.6 * siamese_avg + 0.3 * orb_avg + 0.4 * pattern_avg
             
             if combined_score > best_score:
                 best_score = combined_score
@@ -490,7 +527,7 @@ def verify_images(image_files):
                 }
         
         # Determine authenticity
-        is_authentic = best_score >= 0.65
+        is_authentic = best_score >= 0.73
         product_info = product_db.get(best_batch, {}) if best_batch else {}
         
         result = {
@@ -503,7 +540,7 @@ def verify_images(image_files):
                 "orb_score": round(float(np.mean(orb_scores)) if orb_scores else 0, 3),  # Convert to Python float
                 "pattern_score": round(float(best_pattern_result['combined_score']) if best_pattern_result else 0, 3)  # Convert to Python float
             },
-            "threshold": 0.65,
+            "threshold": 0.60,
             "timestamp": datetime.now().isoformat()
         }
         
@@ -512,12 +549,18 @@ def verify_images(image_files):
     except Exception as e:
         return {"error": f"Verification failed: {str(e)}"}, 500
 
-def train_model_async():
+def train_model_async(label_id=None):
     """Train model in background thread with dynamic progress"""
     global TRAINING_STATUS
     
     try:
-        TRAINING_STATUS = {"status": "training", "progress": 0, "message": "Starting dataset generation...", "timestamp": datetime.now().isoformat()}
+        TRAINING_STATUS = {
+            "status": "training", 
+            "progress": 0, 
+            "message": "Starting dataset generation...", 
+            "timestamp": datetime.now().isoformat(),
+            "label_id": label_id
+        }
         
         # Step 1: Generate dataset first
         print("🔄 Generating dataset...")
@@ -535,15 +578,20 @@ def train_model_async():
                 "status": "failed", 
                 "progress": 0, 
                 "message": f"Dataset generation failed: {dataset_stderr}",
-                "timestamp": datetime.now().isoformat()
+                "timestamp": datetime.now().isoformat(),
+                "label_id": label_id
             }
+            # Send webhook notification for failure
+            if label_id:
+                send_webhook_notification(label_id, "failed")
             return
         
         TRAINING_STATUS = {
             "status": "training", 
             "progress": 20, 
             "message": "Dataset generated. Starting model training...",
-            "timestamp": datetime.now().isoformat()
+            "timestamp": datetime.now().isoformat(),
+            "label_id": label_id
         }
         
         # Step 2: Train the model with real-time progress
@@ -587,7 +635,8 @@ def train_model_async():
                                 "status": "training",
                                 "progress": round(total_progress, 1),
                                 "message": f"Training epoch {current_epoch}/{total_epochs}",
-                                "timestamp": datetime.now().isoformat()
+                                "timestamp": datetime.now().isoformat(),
+                                "label_id": label_id
                             }
                     except (ValueError, AttributeError):
                         pass  # Skip if parsing fails
@@ -598,7 +647,8 @@ def train_model_async():
                         "status": "training",
                         "progress": 95,
                         "message": "Model saved. Finalizing...",
-                        "timestamp": datetime.now().isoformat()
+                        "timestamp": datetime.now().isoformat(),
+                        "label_id": label_id
                     }
         
         # Wait for process to complete
@@ -609,26 +659,39 @@ def train_model_async():
                 "status": "completed", 
                 "progress": 100, 
                 "message": "Training completed successfully",
-                "timestamp": datetime.now().isoformat()
+                "timestamp": datetime.now().isoformat(),
+                "label_id": label_id
             }
             # Reload model
             global model
             model, _ = load_model_and_db()
+            
+            # Send webhook notification for success
+            if label_id:
+                send_webhook_notification(label_id, "completed")
         else:
             TRAINING_STATUS = {
                 "status": "failed", 
                 "progress": TRAINING_STATUS.get("progress", 20), 
                 "message": "Training failed - check logs for details",
-                "timestamp": datetime.now().isoformat()
+                "timestamp": datetime.now().isoformat(),
+                "label_id": label_id
             }
+            # Send webhook notification for failure
+            if label_id:
+                send_webhook_notification(label_id, "failed")
             
     except Exception as e:
         TRAINING_STATUS = {
             "status": "failed", 
             "progress": 0, 
             "message": f"Training error: {str(e)}",
-            "timestamp": datetime.now().isoformat()
+            "timestamp": datetime.now().isoformat(),
+            "label_id": label_id
         }
+        # Send webhook notification for failure
+        if label_id:
+            send_webhook_notification(label_id, "failed")
 
 # =====================
 # API Endpoints
@@ -646,6 +709,8 @@ def health_check():
 @app.route('/api/verify', methods=['POST'])
 def verify_label():
     """Verify uploaded label images"""
+    global TRAINING_STATUS
+    
     try:
         if 'images' not in request.files:
             return jsonify({"error": "No images provided"}), 400
@@ -659,6 +724,23 @@ def verify_label():
         
         if isinstance(result, tuple):  # Error case
             return jsonify(result[0]), result[1]
+        
+        # If not authentic, remove sensitive metadata
+        if not result.get('is_authentic', False):
+            # Create a filtered result without metadata
+            filtered_result = {
+                "is_authentic": result.get('is_authentic', False),
+                "confidence_score": result.get('confidence_score', 0),
+                "analysis": result.get('analysis', {}),
+                "threshold": result.get('threshold', 0.60),
+                "timestamp": result.get('timestamp')
+            }
+            result = filtered_result
+        
+        # Automatically extract label_id from training status if available
+        label_id = TRAINING_STATUS.get('label_id')
+        if label_id:
+            result['label_id'] = label_id
         
         return jsonify(result)
         
@@ -675,14 +757,22 @@ def trigger_training():
         return jsonify({"error": "Training already in progress"}), 400
     
     try:
-        # Start training in background thread
-        training_thread = threading.Thread(target=train_model_async)
+        # Get label_id from request body
+        data = request.get_json() or {}
+        label_id = data.get('label_id')
+        
+        if not label_id:
+            return jsonify({"error": "label_id is required"}), 400
+        
+        # Start training in background thread with label_id
+        training_thread = threading.Thread(target=train_model_async, args=(label_id,))
         training_thread.daemon = True
         training_thread.start()
         
         return jsonify({
             "message": "Training started",
             "status": "training",
+            "label_id": label_id,
             "timestamp": datetime.now().isoformat()
         })
         
@@ -700,77 +790,175 @@ def get_training_status():
 
 @app.route('/api/upload-labels', methods=['POST'])
 def upload_labels():
+    print("\n=== UPLOAD LABELS ENDPOINT CALLED ===")
+    print(f"Request method: {request.method}")
+    print(f"Content-Type: {request.content_type}")
+    print(f"Request headers: {dict(request.headers)}")
+    
     try:
+        print("\n--- Checking for images in request ---")
         if 'images' not in request.files:
+            print("ERROR: No 'images' key found in request.files")
+            print(f"Available keys in request.files: {list(request.files.keys())}")
             return jsonify({'error': 'No images provided'}), 400
         
+        print("✓ Found 'images' in request.files")
+        
         files = request.files.getlist('images')
+        print(f"Number of files received: {len(files)}")
+        
+        print("\n--- Extracting form data ---")
         batch_id = request.form.get('batch_id')
         product_name = request.form.get('product_name', 'unknown')
         sku = request.form.get('sku', 'unknown')
         
+        print(f"batch_id: {batch_id}")
+        print(f"product_name: {product_name}")
+        print(f"sku: {sku}")
+        print(f"All form data: {dict(request.form)}")
+        
         if not batch_id:
+            print("ERROR: batch_id is required but not provided")
             return jsonify({'error': 'batch_id is required'}), 400
+        
+        print("✓ batch_id validation passed")
         
         # Create the dataset/authentic structure
         AUTH_DIR = "dataset/authentic"
         batch_path = os.path.join(AUTH_DIR, batch_id)
+        print(f"\n--- Creating directory structure ---")
+        print(f"AUTH_DIR: {AUTH_DIR}")
+        print(f"batch_path: {batch_path}")
+        
         os.makedirs(batch_path, exist_ok=True)
+        print(f"✓ Directory created/verified: {batch_path}")
         
         uploaded_files = []
         modified_images = []
         
-        for file in files:
+        print(f"\n--- Processing {len(files)} files ---")
+        
+        for i, file in enumerate(files):
+            print(f"\nProcessing file {i+1}/{len(files)}")
+            print(f"File object: {file}")
+            print(f"Filename: {file.filename}")
+            
             if file and file.filename:
-                # Read file data
-                file_data = file.read()
+                print(f"✓ File {i+1} has valid filename: {file.filename}")
                 
-                # Convert to OpenCV image for processing
-                nparr = np.frombuffer(file_data, np.uint8)
-                img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-                
-                if img is None:
+                try:
+                    # Read file data
+                    print(f"Reading file data for: {file.filename}")
+                    file_data = file.read()
+                    print(f"File data length: {len(file_data)} bytes")
+                    
+                    if len(file_data) == 0:
+                        print(f"WARNING: File {file.filename} is empty, skipping")
+                        continue
+                    
+                    # Convert to OpenCV image for processing
+                    print(f"Converting to OpenCV image: {file.filename}")
+                    nparr = np.frombuffer(file_data, np.uint8)
+                    img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+                    
+                    if img is None:
+                        print(f"ERROR: Could not decode image: {file.filename}")
+                        continue
+                    
+                    print(f"✓ Image decoded successfully: {img.shape}")
+                    
+                    # Apply badge-specific micro pattern embedding
+                    print(f"Applying print-resistant patterns to: {file.filename}")
+                    modified_img = add_print_resistant_patterns(img.copy(), batch_id)
+                    print(f"✓ Patterns applied successfully")
+                    
+                    # Convert modified image to base64 for response
+                    print(f"Converting to base64: {file.filename}")
+                    _, buffer = cv2.imencode('.jpg', modified_img)
+                    modified_img_base64 = base64.b64encode(buffer).decode('utf-8')
+                    print(f"✓ Base64 conversion complete, length: {len(modified_img_base64)}")
+                    
+                    # Use original filename (no timestamp prefix needed)
+                    filename = file.filename
+                    file_path = os.path.join(batch_path, filename)
+                    print(f"Saving to: {file_path}")
+                    
+                    # Save the modified image to the batch folder
+                    cv2.imwrite(file_path, modified_img)
+                    print(f"✓ File saved successfully: {file_path}")
+                    
+                    uploaded_files.append({
+                        'filename': filename,
+                        'file_path': file_path,
+                        'batch_id': batch_id,
+                        'product_name': product_name,
+                        'sku': sku
+                    })
+                    
+                    modified_images.append({
+                        'filename': filename,
+                        'modified_image': modified_img_base64
+                    })
+                    
+                    print(f"✓ File {i+1} processed successfully: {filename}")
+                    
+                except Exception as file_error:
+                    print(f"ERROR processing file {file.filename}: {str(file_error)}")
+                    print(f"Error type: {type(file_error).__name__}")
+                    import traceback
+                    print(f"Traceback: {traceback.format_exc()}")
                     continue
-                
-                # Apply badge-specific micro pattern embedding
-                modified_img = add_print_resistant_patterns(img.copy(), batch_id)
-                
-                # Convert modified image to base64 for response
-                _, buffer = cv2.imencode('.jpg', modified_img)
-                modified_img_base64 = base64.b64encode(buffer).decode('utf-8')
-                
-                # Use original filename (no timestamp prefix needed)
-                filename = file.filename
-                file_path = os.path.join(batch_path, filename)
-                
-                # Save the modified image to the batch folder
-                cv2.imwrite(file_path, modified_img)
-                
-                uploaded_files.append({
-                    'filename': filename,
-                    'file_path': file_path,
-                    'batch_id': batch_id,
-                    'product_name': product_name,
-                    'sku': sku
-                })
-                
-                modified_images.append({
-                    'filename': filename,
-                    'modified_image': modified_img_base64
-                })
+            else:
+                print(f"WARNING: File {i+1} is invalid or has no filename, skipping")
+        
+        print(f"\n--- File processing complete ---")
+        print(f"Successfully processed: {len(uploaded_files)} files")
+        print(f"Files in uploaded_files: {[f['filename'] for f in uploaded_files]}")
+        
+        if len(uploaded_files) == 0:
+            print("ERROR: No files were successfully processed")
+            return jsonify({'error': 'No valid images were processed'}), 400
         
         # Update product database to match generate_dataset.py format
-        update_product_database_local(batch_id, product_name, sku, uploaded_files)
+        print(f"\n--- Updating product database ---")
+        print(f"Calling update_product_database_local with:")
+        print(f"  batch_id: {batch_id}")
+        print(f"  product_name: {product_name}")
+        print(f"  sku: {sku}")
+        print(f"  files count: {len(uploaded_files)}")
         
-        return jsonify({
+        update_product_database_local(batch_id, product_name, sku, uploaded_files)
+        print(f"✓ Product database updated")
+        
+        response_data = {
             'message': f'Successfully uploaded {len(uploaded_files)} images to batch {batch_id}',
             'batch_id': batch_id,
             'uploaded_files': len(uploaded_files),
             'batch_path': batch_path,
             'modified_images': modified_images
-        })
+        }
+        
+        print(f"\n--- Preparing response ---")
+        print(f"Response message: {response_data['message']}")
+        print(f"Response batch_id: {response_data['batch_id']}")
+        print(f"Response uploaded_files count: {response_data['uploaded_files']}")
+        print(f"Response batch_path: {response_data['batch_path']}")
+        print(f"Modified images count: {len(response_data['modified_images'])}")
+        
+        print("\n=== UPLOAD LABELS ENDPOINT SUCCESS ===")
+        return jsonify(response_data)
         
     except Exception as e:
+        print(f"\n!!! CRITICAL ERROR in upload_labels !!!")
+        print(f"Error type: {type(e).__name__}")
+        print(f"Error message: {str(e)}")
+        import traceback
+        print(f"Full traceback: {traceback.format_exc()}")
+        print(f"Request method: {request.method}")
+        print(f"Request content_type: {request.content_type}")
+        print(f"Request form keys: {list(request.form.keys()) if hasattr(request, 'form') else 'No form'}")
+        print(f"Request files keys: {list(request.files.keys()) if hasattr(request, 'files') else 'No files'}")
+        print("=== END CRITICAL ERROR ===")
         return jsonify({'error': str(e)}), 500
 
 def update_product_database_local(batch_id, product_name, sku, files):
@@ -779,8 +967,17 @@ def update_product_database_local(batch_id, product_name, sku, files):
     
     # Load existing database
     if os.path.exists(DB_PATH):
-        with open(DB_PATH, 'r') as f:
-            product_db = json.load(f)
+        try:
+            with open(DB_PATH, 'r') as f:
+                content = f.read().strip()
+                if content:  # Check if file has content
+                    product_db = json.loads(content)
+                else:
+                    print("Warning: product_db.json is empty, initializing new database")
+                    product_db = {}
+        except (json.JSONDecodeError, FileNotFoundError) as e:
+            print(f"Warning: Could not load product_db.json ({e}), initializing new database")
+            product_db = {}
     else:
         product_db = {}
     
@@ -794,8 +991,13 @@ def update_product_database_local(batch_id, product_name, sku, files):
     }
     
     # Save updated database
-    with open(DB_PATH, 'w') as f:
-        json.dump(product_db, f, indent=2)
+    try:
+        with open(DB_PATH, 'w') as f:
+            json.dump(product_db, f, indent=2)
+        print(f"✓ Product database updated successfully")
+    except Exception as e:
+        print(f"Error saving product database: {e}")
+        raise
 
 def update_product_database(batch_id, product_name, sku, files):
     """Update product database stored locally"""
@@ -856,3 +1058,4 @@ if __name__ == '__main__':
     # Use PORT environment variable (Fly.io sets this to 8080)
     port = int(os.environ.get('PORT', 3000))
     app.run(host='0.0.0.0', port=port, debug=False)
+

@@ -1,4 +1,4 @@
-# fly.toml app configuration file generated for covert-labels-aged-dust-9234 on 2025-07-09T14:40:53+01:00
+# fly.toml app configuration file generated for covert-labels-aged-dust-9234 on 2025-07-16T14:32:54+01:00
 #
 # See https://fly.io/docs/reference/configuration/ for information about how to use this file.
 #
@@ -9,23 +9,27 @@ primary_region = 'ord'
 [build]
 
 [deploy]
-  release_command = 'mkdir -p dataset/authentic dataset/fake dataset/authentic_augmented dataset/fingerprints uploads authentic_labels'
+  release_command = 'mkdir -p dataset/authentic dataset/fake dataset/authentic_augmented dataset/fingerprints uploads authentic_labels models'
 
 [env]
   PORT = '8080'
 
+[[mounts]]
+  source = 'models'
+  destination = '/app/models'
+
 [http_service]
   internal_port = 8080
   force_https = true
-  auto_stop_machines = true
-  auto_start_machines = true
-  min_machines_running = 0
+  auto_stop_machines = 'off'
+  auto_start_machines = false
+  min_machines_running = 1
   processes = ['app']
 
 [[vm]]
-  memory = '2gb'
+  memory = '4gb'
   cpu_kind = 'shared'
-  cpus = 4
+  cpus = 8
 
 [[statics]]
   guest_path = '/app/public'

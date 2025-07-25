@@ -13,7 +13,7 @@ OUTPUT_DIR = "clg_output_images"
 METADATA_PATH = "clg_microdot_metadata.json"
 DOT_COUNT = 10
 JITTER = 5
-DOT_RADIUS = 3
+DOT_RADIUS = 2  # Reduced from 3 to 1 for smaller dots
 IMG_SIZE = (600, 600)
 MIN_DISTANCE_FROM_TEXT = 20
 VARIATIONS_COUNT = 30 # Number of variations per batch
@@ -67,31 +67,81 @@ def apply_jitter(coords):
     return np.clip(jittered, DOT_RADIUS, IMG_SIZE[0] - DOT_RADIUS)
 
 def draw_invisible_dots(img, coords):
-    """Draw very faint microdots for minimal visibility while maintaining detectability"""
+    """Draw very faint microdots that blend with the image colors for minimal visibility while maintaining detectability"""
     img_copy = img.copy()
     
     for (x, y) in coords:
-        # Get the local background color
-        local_area = img[max(0, y-5):min(img.shape[0], y+6), 
-                        max(0, x-5):min(img.shape[1], x+6)]
+        # Enhanced color sampling - use larger area for better color representation
+        sample_radius = 8
+        local_area = img[max(0, y-sample_radius):min(img.shape[0], y+sample_radius+1), 
+                        max(0, x-sample_radius):min(img.shape[1], x+sample_radius+1)]
+        
+        # Get multiple color statistics for better blending
         avg_color = np.mean(local_area, axis=(0, 1))
+        median_color = np.median(local_area.reshape(-1, 3), axis=0)
         
-        # Use extremely subtle brightness shift for faint visibility
-        # Reduced to 3-8 units (out of 255) for very faint appearance
-        brightness_shift = random.randint(3, 8)
+        # Use weighted combination of average and median for more natural color
+        base_color = 0.7 * avg_color + 0.3 * median_color
         
-        # Randomly decide to make it darker or lighter
-        if random.random() > 0.5:
-            dot_color = np.clip(avg_color - brightness_shift, 0, 255)
-        else:
-            dot_color = np.clip(avg_color + brightness_shift, 0, 255)
+        # Sample a few pixels around the dot position for color variation
+        sample_points = [
+            (max(0, min(img.shape[1]-1, x + dx)), max(0, min(img.shape[0]-1, y + dy)))
+            for dx, dy in [(-3, -3), (3, -3), (-3, 3), (3, 3), (0, 0)]
+        ]
         
-        # Draw the main dot with full radius
+        sampled_colors = [img[py, px] for px, py in sample_points]
+        dominant_color = np.mean(sampled_colors, axis=0)
+        
+        # Blend the base color with dominant color for natural appearance
+        final_base_color = 0.6 * base_color + 0.4 * dominant_color
+        
+        # Use smaller brightness shift for more subtle appearance
+        brightness_shift = random.randint(2, 6)
+        
+        # Randomly decide to make it darker or lighter based on image brightness
+        local_brightness = np.mean(final_base_color)
+        if local_brightness > 127:  # Bright area - make dot darker
+            dot_color = np.clip(final_base_color - brightness_shift, 0, 255)
+        else:  # Dark area - make dot lighter
+            dot_color = np.clip(final_base_color + brightness_shift, 0, 255)
+        
+        # Draw the main dot with adaptive color
         cv2.circle(img_copy, (x, y), DOT_RADIUS, dot_color.tolist(), -1)
         
-        # Add an extremely subtle outer ring
-        outer_color = avg_color + (dot_color - avg_color) * 0.15  # Very subtle 15% blend
+        # Add an extremely subtle outer ring that blends with surrounding colors
+        ring_samples = [
+            img[max(0, min(img.shape[0]-1, y + dy)), max(0, min(img.shape[1]-1, x + dx))]
+            for dx, dy in [(-5, 0), (5, 0), (0, -5), (0, 5)]
+        ]
+        ring_color = np.mean(ring_samples, axis=0)
+        outer_color = 0.8 * ring_color + 0.2 * dot_color  # Very subtle blend
         cv2.circle(img_copy, (x, y), DOT_RADIUS + 1, outer_color.tolist(), 1)
+    
+    return img_copy
+
+def draw_visible_small_dots(img, coords):
+    """Draw small visible microdots that are clearly visible but minimal in size"""
+    img_copy = img.copy()
+    
+    for (x, y) in coords:
+        # Get the local background color for contrast
+        local_area = img[max(0, y-3):min(img.shape[0], y+4), 
+                        max(0, x-3):min(img.shape[1], x+4)]
+        avg_color = np.mean(local_area, axis=(0, 1))
+        
+        # Choose contrasting color based on brightness
+        local_brightness = np.mean(avg_color)
+        if local_brightness > 127:  # Bright area - use dark dot
+            dot_color = (0, 0, 0)  # Black
+        else:  # Dark area - use light dot
+            dot_color = (255, 255, 255)  # White
+        
+        # Draw small visible dot
+        cv2.circle(img_copy, (x, y), DOT_RADIUS, dot_color, -1)
+        
+        # Optional: Add very thin contrasting border for better visibility
+        border_color = (255, 255, 255) if dot_color == (0, 0, 0) else (0, 0, 0)
+        cv2.circle(img_copy, (x, y), DOT_RADIUS, border_color, 1)
     
     return img_copy
 
@@ -283,8 +333,8 @@ for entry in records:
         triang = Delaunay(coords)
         h = hash_dot_geometry(coords)
 
-        # Draw image with INVISIBLE microdots
-        dotted = draw_invisible_dots(original.copy(), coords)
+        # Draw image with SMALL VISIBLE microdots
+        dotted = draw_visible_small_dots(original.copy(), coords)
 
         # Folder structure
         subfolder = os.path.join(OUTPUT_DIR, product_name, batch["batch"])

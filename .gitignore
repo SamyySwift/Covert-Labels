@@ -4,3 +4,5 @@ uploads
 product_db.json
 dataset
 images
+clg_output_images
+batch_classifier_model.h5

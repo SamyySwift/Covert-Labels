@@ -6,19 +6,21 @@ from tqdm import tqdm
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
 import tensorflow as tf
-from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import Conv2D, MaxPooling2D, Flatten, Dense, Dropout
+from tensorflow.keras.models import Sequential, Model
+from tensorflow.keras.layers import Conv2D, MaxPooling2D, Flatten, Dense, Dropout, GlobalAveragePooling2D
+from tensorflow.keras.applications import EfficientNetB0
+from tensorflow.keras.applications.efficientnet import preprocess_input
 from tensorflow.keras.callbacks import EarlyStopping
 from collections import Counter
 import random
-from tensorflow.keras.preprocessing.image import ImageDataGenerator
+from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau, ModelCheckpoint
 
 # --- Config ---
 IMG_SIZE = (224, 224)
 DATA_DIR = "clg_output_images"
 METADATA_FILE = "./clg_microdot_metadata.json"
 BATCH = 8
-EPOCHS = 25
+EPOCHS = 30
 
 # --- Augmentation Functions ---
 # Increase minimum samples and add more aggressive augmentation
@@ -117,6 +119,9 @@ print(f"\n✅ Loaded dataset: {len(images)} images across {len(set(labels))} cla
 
 # --- Prepare Data ---
 X = np.array(images)
+# Preprocess for EfficientNet (scales to [-1, 1])
+X = preprocess_input(X * 255.0)  # Convert back to [0, 255] then preprocess
+
 le = LabelEncoder()
 y = le.fit_transform(labels)
 class_names = le.classes_
@@ -130,25 +135,45 @@ print(f"Minimum class count: {min(class_counts.values())}")
 X_train, X_test, y_train, y_test = train_test_split(X, y, stratify=y, test_size=0.2, random_state=42)
 print(f"✅ Using stratified split: {len(X_train)} train, {len(X_test)} test samples")
 
-# --- Build Model ---
-model = Sequential([
-    Conv2D(32, (3, 3), activation="relu", input_shape=(IMG_SIZE[0], IMG_SIZE[1], 3)),
-    MaxPooling2D(),
-    Conv2D(64, (3, 3), activation="relu"),
-    MaxPooling2D(),
-    Flatten(),
-    Dropout(0.3),
-    Dense(128, activation="relu"),
-    Dropout(0.2),
-    Dense(len(class_names), activation="softmax")
-])
+# --- Build Model with Transfer Learning ---
+def create_model():
+    """Create and compile the CNN model using EfficientNetB0 transfer learning"""
+    # Load pre-trained EfficientNetB0 without top layers
+    base_model = EfficientNetB0(
+        weights='imagenet',
+        include_top=False,
+        input_shape=(IMG_SIZE[0], IMG_SIZE[1], 3)
+    )
+    
+    # Keep base model trainable from the start (since we achieved 100% accuracy)
+    base_model.trainable = True
+    
+    # Add custom classification head
+    model = Sequential([
+        base_model,
+        GlobalAveragePooling2D(),
+        Dropout(0.3),
+        Dense(512, activation='relu'),
+        Dropout(0.5),
+        Dense(256, activation='relu'),
+        Dropout(0.3),
+        Dense(len(class_names), activation='softmax')
+    ])
+    
+    # Use a lower learning rate since we're training all layers
+    optimizer = tf.keras.optimizers.Adam(learning_rate=0.0001)
+    model.compile(
+        optimizer=optimizer,
+        loss='sparse_categorical_crossentropy',
+        metrics=['accuracy']
+    )
+    return model
 
-# Use a lower learning rate
-optimizer = tf.keras.optimizers.Adam(learning_rate=0.0001)  # Reduced from default 0.001
-model.compile(optimizer=optimizer, loss="sparse_categorical_crossentropy", metrics=["accuracy"])
+# Create initial model
+model = create_model()
 model.summary()
 
-from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau, ModelCheckpoint
+
 
 callbacks = [
     EarlyStopping(patience=5, restore_best_weights=True, monitor='val_loss'),
@@ -157,12 +182,14 @@ callbacks = [
 ]
 
 # --- Train ---
-model.fit(
+print("\n🚀 Training with end-to-end fine-tuning...")
+history = model.fit(
     X_train, y_train,
     validation_data=(X_test, y_test),
     epochs=EPOCHS,
     batch_size=BATCH,
-    callbacks=callbacks
+    callbacks=callbacks,
+    verbose=1
 )
 
 # --- Save Model & Label Map ---
@@ -173,5 +200,12 @@ with open("batch_label_map.json", "w") as f:
 with open("batch_metadata_map.json", "w") as f:
     json.dump(batch_metadata, f, indent=2)
 
-print("✅ Training complete. Model and metadata saved.")
+# --- Evaluate Final Model ---
+final_loss, final_accuracy = model.evaluate(X_test, y_test, verbose=0)
+print(f"\n📊 Final Test Results:")
+print(f"Test Accuracy: {final_accuracy:.4f} ({final_accuracy*100:.2f}%)")
+print(f"Test Loss: {final_loss:.4f}")
+
+print("\n✅ Transfer learning training complete! Model and metadata saved.")
+
 

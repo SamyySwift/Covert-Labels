@@ -1,0 +1,100 @@
+{
+  "06250101": {
+    "product": "Sartor Activated Charcoal Face Wash 500ml",
+    "barcode": "5191102015196500",
+    "manufacturer": "Sartor Health Company Ltd.",
+    "prod_date": "01/06/2025",
+    "exp_date": "01/06/2027"
+  },
+  "06250102": {
+    "product": "Sartor Activated Charcoal Face Wash 500ml",
+    "barcode": "5191102015196500",
+    "manufacturer": "Sartor Health Company Ltd.",
+    "prod_date": "01/06/2026",
+    "exp_date": "01/06/2028"
+  },
+  "05250101": {
+    "product": "Sartor Disinfectant Solution 70ml",
+    "barcode": "51911820151800700",
+    "manufacturer": "Sartor Health Company Ltd.",
+    "prod_date": "01/06/2025",
+    "exp_date": "01/06/2027"
+  },
+  "05250102": {
+    "product": "Sartor Disinfectant Solution 70ml",
+    "barcode": "51911820151800700",
+    "manufacturer": "Sartor Health Company Ltd.",
+    "prod_date": "01/06/2026",
+    "exp_date": "01/06/2028"
+  },
+  "04250101": {
+    "product": "Sartor Aleo Vera Face Cleanser 500ml",
+    "barcode": "19118201814115500",
+    "manufacturer": "Sartor Health Company Ltd.",
+    "prod_date": "01/06/2025",
+    "exp_date": "01/06/2027"
+  },
+  "04250102": {
+    "product": "Sartor Aleo Vera Face Cleanser 500ml",
+    "barcode": "19118201814115500",
+    "manufacturer": "Sartor Health Company Ltd.",
+    "prod_date": "01/06/2026",
+    "exp_date": "01/06/2028"
+  },
+  "03250101": {
+    "product": "Sartor Instant Hand Sanitizer 30ml",
+    "barcode": "519118201518030",
+    "manufacturer": "Sartor Health Company Ltd.",
+    "prod_date": "01/06/2025",
+    "exp_date": "01/06/2027"
+  },
+  "03250102": {
+    "product": "Sartor Instant Hand Sanitizer 30ml",
+    "barcode": "519118201518030",
+    "manufacturer": "Sartor Health Company Ltd.",
+    "prod_date": "01/06/2026",
+    "exp_date": "01/06/2028"
+  },
+  "01250101": {
+    "product": "Sartor Instant Hand Sanitizer 70ml",
+    "barcode": "5191182015180070",
+    "manufacturer": "Sartor Health Company Ltd.",
+    "prod_date": "01/06/2025",
+    "exp_date": "01/06/2027"
+  },
+  "01250102": {
+    "product": "Sartor Instant Hand Sanitizer 70ml",
+    "barcode": "5191182015180070",
+    "manufacturer": "Sartor Health Company Ltd.",
+    "prod_date": "01/06/2026",
+    "exp_date": "01/06/2028"
+  },
+  "02250101": {
+    "product": "Sartor Instant Hand Sanitizer 500ml",
+    "barcode": "5191182015180070",
+    "manufacturer": "Sartor Health Company Ltd.",
+    "prod_date": "01/06/2025",
+    "exp_date": "01/06/2027"
+  },
+  "02250102": {
+    "product": "Sartor Instant Hand Sanitizer 500ml",
+    "barcode": "5191182015180070",
+    "manufacturer": "Sartor Health Company Ltd.",
+    "prod_date": "01/06/2026",
+    "exp_date": "01/06/2028"
+  },
+  "00250101": {
+    "product": "Sartor Intense Moisturizing Lotion 500ml",
+    "barcode": "191182019913500",
+    "manufacturer": "Sartor Health Company Ltd.",
+    "prod_date": "01/06/2025",
+    "exp_date": "01/06/2027"
+  },
+  "00250102": {
+    "product": "Sartor Intense Moisturizing Lotion 500ml",
+    "barcode": "191182019913500",
+    "manufacturer": "Sartor Health Company Ltd.",
+    "prod_date": "01/06/2026",
+    "exp_date": "01/06/2028"
+  }
+}
