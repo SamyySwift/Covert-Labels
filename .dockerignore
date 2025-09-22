@@ -1,0 +1,52 @@
+# flyctl launch added from .gitignore
+**/.env
+**/Product Requirements Document (PRD) for Sartor CRM.md
+**/uploads
+fly.toml
+images/*
+app/images/
+app/models/
+
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+pip-log.txt
+pip-delete-this-directory.txt
+.tox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.log
+.git
+.mypy_cache
+.pytest_cache
+.hypothesis
+
+# Exclude unused directories and files
+images/*
+dataset/
+*.npy
+*.keras
+uploads/
+authentic_labels/
+clg_output_images/
+__pycache__/
+*.pyc
+*.jpg
+
+# Keep only essential files
+!requirements.txt
+!flask_app.py
+!Dockerfile
+!fly.toml
+!batch_classifier_model.keras
+!batch_label_map.json
+!batch_metadata_map.json

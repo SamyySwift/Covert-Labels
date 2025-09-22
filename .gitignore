@@ -1,0 +1,10 @@
+.env
+Product Requirements Document (PRD) for Sartor CRM.md
+uploads
+product_db.json
+dataset
+images
+clg_output_images
+*.jpg
+fly.toml
+batch_classifier_model.keras

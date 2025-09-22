@@ -1,0 +1,10 @@
+Flask
+tensorflow[and-cuda]
+Pillow
+numpy
+openai
+python-dotenv
+gunicorn
+flask-cors
+opencv-python
+scikit-learn
