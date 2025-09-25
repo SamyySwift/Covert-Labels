@@ -10,7 +10,6 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 from dotenv import load_dotenv
 import io
-# import uuid
 from werkzeug.utils import secure_filename  
 import cv2
 import sqlite3  
@@ -18,6 +17,7 @@ import random
 import threading  
 import subprocess  
 from datetime import datetime  
+
 
 
 load_dotenv()
@@ -203,8 +203,11 @@ def save_image_bytes(image_bytes: bytes, original_filename: str, product: str | 
     folder = os.path.join(UPLOAD_DIR, product_slug, batch_slug)
     os.makedirs(folder, exist_ok=True)
 
-    # Do NOT save original image to disk anymore
-    original_path = None
+    # Save original image to disk for record-keeping
+    safe_name = secure_filename(original_filename) or "upload.png"
+    original_path = os.path.join(folder, f"original_{safe_name}")
+    with open(original_path, "wb") as f:
+        f.write(image_bytes)
 
     return {"label_id": label_id, "folder": folder, "original_path": original_path}
 
@@ -221,7 +224,7 @@ def apply_label_modifications(pil_image: Image.Image, modified_label: dict | Non
     """
     # Defaults can be overridden by modified_label fields
     params = {
-        "dot_count": 7,
+        "dot_count": 5,
         "dot_radius": 6,
         "margin": 10,
     }
@@ -232,217 +235,379 @@ def apply_label_modifications(pil_image: Image.Image, modified_label: dict | Non
     img_cv = cv2.cvtColor(np.array(pil_image.convert("RGB")), cv2.COLOR_RGB2BGR)
     h, w = img_cv.shape[:2]
 
-    # Randomly place dots away from edges; no text mask to keep API fast
     rng = np.random.default_rng()
     xs = rng.integers(params["margin"] + params["dot_radius"], w - params["margin"] - params["dot_radius"], params["dot_count"])
     ys = rng.integers(params["margin"] + params["dot_radius"], h - params["margin"] - params["dot_radius"], params["dot_count"])
     coords = list(zip(xs.tolist(), ys.tolist()))
 
-    # Draw small visible white-leaning dots with subtle halo (no coords saved)
+    # Draw small visible YELLOW dots (BGR: 0, 255, 255)
     for (x, y) in coords:
-        local = img_cv[max(0, y-3):min(h, y+4), max(0, x-3):min(w, x+4)]
-        avg_color = np.mean(local, axis=(0, 1)) if local.size > 0 else np.array([200, 200, 200], dtype=np.float32)
-        # White-leaning color
-        dot_color = (0.75 * np.array([255, 255, 255]) + 0.25 * avg_color).clip(0, 255).astype(np.uint8)
+        dot_color = np.array([0, 255, 255], dtype=np.uint8)  # pure yellow
         cv2.circle(img_cv, (x, y), params["dot_radius"], dot_color.tolist(), -1)
-        # Subtle halo blended with background
-        ring_color = (0.6 * avg_color + 0.4 * dot_color).clip(0, 255).astype(np.uint8)
-        cv2.circle(img_cv, (x, y), params["dot_radius"] + 1, ring_color.tolist(), 1)
+        # Optional soft halo to blend edges slightly
+        cv2.circle(img_cv, (x, y), params["dot_radius"] + 1, dot_color.tolist(), 1)
 
     processed = Image.fromarray(cv2.cvtColor(img_cv, cv2.COLOR_BGR2RGB))
-    # Return a summary but no coordinates
     summary = {
         "applied": True,
-        "method": "microdot_overlay",
+        "method": "microdot_overlay_yellow",
         "dot_count": params["dot_count"],
         "dot_radius": params["dot_radius"]
     }
     return processed, summary
 
-# --- Augmentations copied from generate_clg_batches.py ---
-def apply_brightness_variation(img, factor_range=(0.85, 1.15)):
-    factor = random.uniform(*factor_range)
-    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
-    hsv[:, :, 2] = np.clip(hsv[:, :, 2] * factor, 0, 255)
-    return cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
+def generate_dot_mask(image: Image.Image, dot_coords: list[tuple[int, int]] | None = None, dot_count: int = 100, dot_radius: int = 3, margin: int = 5) -> Image.Image:
+    """
+    Create a black background + white dot mask of size IMG_SIZE.
+    If dot_coords is None, random coordinates are generated within margins.
+    """
+    # Prepare black canvas
+    w, h = IMG_SIZE
+    mask = np.zeros((h, w), dtype=np.uint8)
 
-def apply_contrast_variation(img, factor_range=(0.85, 1.15)):
-    factor = random.uniform(*factor_range)
-    return np.clip(img.astype(np.float32) * factor, 0, 255).astype(np.uint8)
+    # Generate random coords if not provided
+    if dot_coords is None:
+        rng = np.random.default_rng()
+        xs = rng.integers(margin + dot_radius, w - margin - dot_radius, dot_count)
+        ys = rng.integers(margin + dot_radius, h - margin - dot_radius, dot_count)
+        dot_coords = list(zip(xs.tolist(), ys.tolist()))
 
-def apply_gaussian_blur(img, kernel_range=(1, 3)):
-    kernel_candidates = [k for k in range(kernel_range[0], kernel_range[1] + 1) if k % 2 == 1]
-    kernel_size = random.choice(kernel_candidates)
-    return cv2.GaussianBlur(img, (kernel_size, kernel_size), 0)
+    # Draw white dots
+    for (x, y) in dot_coords:
+        cv2.circle(mask, (int(x), int(y)), int(dot_radius), 255, -1)
 
-def apply_rotation(img, angle_range=(-3, 3)):
-    angle = random.uniform(*angle_range)
-    h, w = img.shape[:2]
-    center = (w // 2, h // 2)
-    rotation_matrix = cv2.getRotationMatrix2D(center, angle, 1.0)
-    return cv2.warpAffine(img, rotation_matrix, (w, h), borderValue=(255, 255, 255))
+    # Convert single-channel mask to 3-channel RGB
+    mask_rgb = cv2.cvtColor(mask, cv2.COLOR_GRAY2RGB)
+    return Image.fromarray(mask_rgb)
 
-def apply_perspective_tilt(img, tilt_range=0.015):
-    h, w = img.shape[:2]
-    tilt = random.uniform(-tilt_range, tilt_range)
-    src_points = np.float32([[0, 0], [w, 0], [w, h], [0, h]])
-    dst_points = np.float32([
+def _apply_resolution_degradation(img_bgr: np.ndarray, min_scale=0.5, max_scale=0.85) -> np.ndarray:
+    """Downsample and upsample to simulate resolution loss."""
+    h, w = img_bgr.shape[:2]
+    scale = random.uniform(min_scale, max_scale)
+    small = cv2.resize(img_bgr, (max(1, int(w * scale)), max(1, int(h * scale))), interpolation=cv2.INTER_AREA)
+    restored = cv2.resize(small, (w, h), interpolation=cv2.INTER_LINEAR)
+    return restored
+
+def _add_salt_pepper_noise(gray: np.ndarray, amount=0.01) -> np.ndarray:
+    """Add salt & pepper noise to a single-channel image."""
+    noisy = gray.copy()
+    num_pixels = gray.size
+    num_salt = int(amount * num_pixels * 0.5)
+    num_pepper = int(amount * num_pixels * 0.5)
+
+    # Salt (white) noise
+    coords = (np.random.randint(0, gray.shape[0], num_salt), np.random.randint(0, gray.shape[1], num_salt))
+    noisy[coords] = 255
+    # Pepper (black) noise
+    coords = (np.random.randint(0, gray.shape[0], num_pepper), np.random.randint(0, gray.shape[1], num_pepper))
+    noisy[coords] = 0
+    return noisy
+
+def apply_augmentations(mask_img: Image.Image) -> Image.Image:
+    """
+    Apply synthetic print–scan distortions to simulate real-world conditions:
+    - Gaussian blur (ENABLED)
+    - Brightness/contrast variation (ENABLED)
+    - Perspective tilt (ENABLED)
+    - Affine shear (ENABLED)
+    - Random crop + resize (ENABLED)
+    - Resolution degradation (ENABLED)
+    - Additive noise (DISABLED)
+    Ensures final output is a binary mask (black background + white dots).
+    """
+    img_bgr = cv2.cvtColor(np.array(mask_img.convert("RGB")), cv2.COLOR_RGB2BGR)
+    h, w = img_bgr.shape[:2]
+
+    # 1) Gaussian blur (mild)
+    kernel_candidates = [k for k in range(1, 5) if k % 2 == 1]  # 1 or 3
+    k = random.choice(kernel_candidates)
+    img_bgr = cv2.GaussianBlur(img_bgr, (k, k), 0)
+
+    # 2) Brightness/contrast (small shifts)
+    alpha = random.uniform(0.9, 1.1)  # contrast
+    beta = random.uniform(-10, 10)    # brightness
+    img_bgr = np.clip(img_bgr.astype(np.float32) * alpha + beta, 0, 255).astype(np.uint8)
+
+    # 3) Perspective tilt (small)
+    tilt = random.uniform(-0.015, 0.015)
+    src = np.float32([[0, 0], [w, 0], [w, h], [0, h]])
+    dst = np.float32([
         [tilt * w, tilt * h],
         [w - tilt * w, tilt * h],
         [w + tilt * w, h - tilt * h],
         [-tilt * w, h - tilt * h]
     ])
-    perspective_matrix = cv2.getPerspectiveTransform(src_points, dst_points)
-    return cv2.warpPerspective(img, perspective_matrix, (w, h), borderValue=(255, 255, 255))
+    M = cv2.getPerspectiveTransform(src, dst)
+    img_bgr = cv2.warpPerspective(img_bgr, M, (w, h), borderValue=(0, 0, 0))
 
-def apply_crop_and_resize(img, crop_range=(0.92, 1.0)):
-    h, w = img.shape[:2]
-    crop_factor = random.uniform(*crop_range)
-    new_h, new_w = int(h * crop_factor), int(w * crop_factor)
-    start_y = random.randint(0, h - new_h)
-    start_x = random.randint(0, w - new_w)
-    cropped = img[start_y:start_y + new_h, start_x:start_x + new_w]
-    return cv2.resize(cropped, (w, h))
+    # 4) Affine shear (small)
+    shear_x = random.uniform(-0.03, 0.03)
+    shear_y = random.uniform(-0.02, 0.02)
+    M_shear = np.float32([[1, shear_x, 0],
+                          [shear_y, 1, 0]])
+    img_bgr = cv2.warpAffine(img_bgr, M_shear, (w, h), flags=cv2.INTER_LINEAR, borderValue=(0, 0, 0))
 
-def apply_noise(img, noise_factor=0.008):
-    noise = np.random.normal(0, noise_factor * 255, img.shape)
-    noisy_img = img.astype(np.float32) + noise
-    return np.clip(noisy_img, 0, 255).astype(np.uint8)
+    # 5) Random crop then resize back (simulate framing)
+    crop_scale = random.uniform(0.92, 0.98)  # keep most of the image
+    new_w = max(1, int(w * crop_scale))
+    new_h = max(1, int(h * crop_scale))
+    x0 = 0 if w == new_w else random.randint(0, w - new_w)
+    y0 = 0 if h == new_h else random.randint(0, h - new_h)
+    cropped = img_bgr[y0:y0 + new_h, x0:x0 + new_w]
+    img_bgr = cv2.resize(cropped, (w, h), interpolation=cv2.INTER_LINEAR)
 
-def generate_variation(base_img, variation_id):
-    img = base_img.copy()
-    augmentations = [
-        lambda x: apply_brightness_variation(x, (0.85, 1.15)),
-        lambda x: apply_contrast_variation(x, (0.85, 1.15)),
-        lambda x: apply_gaussian_blur(x, (1, 3)),
-        lambda x: apply_rotation(x, (-3, 3)),
-        lambda x: apply_perspective_tilt(x, 0.015),
-        lambda x: apply_crop_and_resize(x, (0.92, 1.0)),
-        lambda x: apply_noise(x, 0.008)
-    ]
-    num_augs = random.randint(2, 4)
-    for aug in random.sample(augmentations, num_augs):
-        img = aug(img)
-    return img
-def save_upload_record(label_id: str,
-                       product: str | None,
-                       batch: str | None,
-                       sanitized_metadata: dict | None,
-                       original_path: str | None,
-                       processed_path: str) -> None:
-    """Persist upload and its sanitized metadata to SQLite."""
-    md = sanitized_metadata or {}
-    row = (
-        label_id,
-        product,
-        batch,
-        md.get("barcode"),
-        md.get("manufacturer"),
-        md.get("production_date"),
-        md.get("expiry_date"),
-        md.get("notes"),
-        original_path,
-        processed_path,
-        json.dumps(md)
-    )
-    conn = sqlite3.connect(DB_PATH)
+    # 6) Resolution degradation
+    img_bgr = _apply_resolution_degradation(img_bgr)
+
+    # 7) Noise augmentations: DISABLED (keep off)
+    gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
+
+    # Re-threshold to enforce binary mask format
+    gray = cv2.GaussianBlur(gray, (3, 3), 0)
+    _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+
+    mask_rgb = cv2.cvtColor(binary, cv2.COLOR_GRAY2RGB)
+    return Image.fromarray(mask_rgb)
+
+def extract_dot_mask_from_scan(scan_img: Image.Image, use_blob: bool = True) -> Image.Image:
+    """
+    Extract a clean binary mask (black background + white dots) for yellow dots only.
+    """
+   
+
+    img_bgr = cv2.cvtColor(np.array(scan_img.convert("RGB")), cv2.COLOR_RGB2BGR)
+    H, W = img_bgr.shape[:2]
+
+    # Convert to HSV
+    hsv = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2HSV)
+
+    # --- Focus on yellow hue range ---
+    # Yellow usually around 20–35 in HSV Hue (OpenCV hue range is 0–179)
+    lower_yellow = np.array([18, 120, 180], dtype=np.uint8)  # tighter lower bound
+    upper_yellow = np.array([40, 255, 255], dtype=np.uint8)  # tighter upper bound
+    mask = cv2.inRange(hsv, lower_yellow, upper_yellow)
+
+    # --- Morphology to remove noise and close small gaps ---
+    kernel = np.ones((3, 3), np.uint8)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=1)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=1)
+
+    # --- Optional blob filtering ---
+    if use_blob:
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        filtered = np.zeros_like(mask)
+        for cnt in contours:
+            area = cv2.contourArea(cnt)
+            if area < 5 or area > 300:  # discard too small/large areas
+                continue
+            per = cv2.arcLength(cnt, True)
+            if per == 0:
+                continue
+            circularity = (4 * np.pi * area) / (per * per)
+            if circularity > 0.4:  # keep roundish blobs
+                cv2.drawContours(filtered, [cnt], -1, 255, -1)
+        mask = filtered
+
+    # Convert to binary RGB
+    mask = (mask > 0).astype(np.uint8) * 255
+    mask_rgb = cv2.cvtColor(mask, cv2.COLOR_GRAY2RGB)
+    return Image.fromarray(mask_rgb)
+
+
+def save_image_bytes(image_bytes: bytes, original_filename: str, product: str | None = None, batch: str | None = None, label_id: str | None = None) -> dict:
+   
+    if not label_id or not isinstance(label_id, str) or not label_id.strip():
+        raise ValueError("Missing or invalid label_id")
+    safe_name = secure_filename(original_filename) or "upload.png"
+
+    # Build folder as uploads/<product>/<batch>
+    product_slug = secure_filename((product or "unknown_product").strip()) or "unknown_product"
+    batch_slug = secure_filename((batch or "unknown_batch").strip()) or "unknown_batch"
+    folder = os.path.join(UPLOAD_DIR, product_slug, batch_slug)
+    os.makedirs(folder, exist_ok=True)
+
+    # Do NOT save original image to disk anymore
+    original_path = None
+
+    return {"label_id": label_id, "folder": folder, "original_path": original_path}
+
+
+@app.route('/api/verify', methods=['POST'])
+def verify_batch():
+    import io, base64
     try:
-        conn.execute(
-            """INSERT OR REPLACE INTO uploads
-               (upload_id, product, batch, barcode, manufacturer, production_date, expiry_date, notes, original_path, processed_path, metadata_json)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            row
-        )
-        conn.commit()
-    finally:
-        conn.close()
-# Helper and routes for reading uploads from SQLite
-def _to_int(val, default: int, min_val: int, max_val: int) -> int:
-    try:
-        iv = int(val)
-        return max(min_val, min(iv, max_val))
-    except Exception:
-        return default
+        image_data = None
 
-def fetch_upload_by_id(upload_id: str) -> dict | None:
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    try:
-        cur = conn.execute(
-            """SELECT upload_id, product, batch, barcode, manufacturer, production_date, expiry_date, notes,
-                      original_path, processed_path, metadata_json, created_at
-               FROM uploads
-               WHERE upload_id = ?""",
-            (upload_id,)
-        )
-        row = cur.fetchone()
-        return dict(row) if row else None
-    finally:
-        conn.close()
-
-def fetch_uploads_list(limit: int, offset: int) -> list[dict]:
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    try:
-        cur = conn.execute(
-            """SELECT upload_id, product, batch, barcode, manufacturer, production_date, expiry_date, notes,
-                      original_path, processed_path, metadata_json, created_at
-               FROM uploads
-               ORDER BY datetime(created_at) DESC
-               LIMIT ? OFFSET ?""",
-            (limit, offset)
-        )
-        rows = cur.fetchall()
-        return [dict(r) for r in rows]
-    finally:
-        conn.close()
-
-@app.route('/api/uploads/<label_id>', methods=['GET'])
-def get_upload(label_id):
-    try:
-        row = fetch_upload_by_id(label_id)
-        if not row:
-            return jsonify({"status": "error", "error": "Not found"}), 404
-        # Parse metadata_json for convenience
-        md = None
-        if row.get("metadata_json"):
+        # Support JSON with base64 image
+        if request.is_json:
+            data = request.get_json(silent=True) or {}
+            image_b64 = data.get("image") or data.get("image_base64")
+            if not image_b64:
+                return jsonify({"status": "error", "error": "Missing 'image' (base64) in JSON payload"}), 400
+            if isinstance(image_b64, str) and image_b64.startswith("data:image/"):
+                image_b64 = image_b64.split(",", 1)[1]
             try:
-                md = json.loads(row["metadata_json"])
-            except Exception:
-                md = None
-        row["metadata"] = md
-        # Rename field in response
-        row["label_id"] = row.pop("upload_id", None)
-        return jsonify({"status": "success", "item": row}), 200
-    except Exception as e:
-        return jsonify({"status": "error", "error": str(e)}), 500
+                image_data = base64.b64decode(image_b64)
+            except Exception as e:
+                return jsonify({"status": "error", "error": f"Invalid base64 image: {e}"}), 400
 
-@app.route('/api/uploads', methods=['GET'])
-def list_uploads():
-    try:
-        limit = _to_int(request.args.get("limit"), default=50, min_val=1, max_val=200)
-        offset = _to_int(request.args.get("offset"), default=0, min_val=0, max_val=1_000_000)
-        items = fetch_uploads_list(limit=limit, offset=offset)
-        # Parse metadata_json for each item for convenience
-        for it in items:
-            md = None
-            if it.get("metadata_json"):
-                try:
-                    md = json.loads(it["metadata_json"])
-                except Exception:
-                    md = None
-            it["metadata"] = md
-            # Rename field in response
-            it["label_id"] = it.pop("upload_id", None)
+        # Support multipart form upload
+        elif 'image' in request.files:
+            file = request.files['image']
+            if file.filename == '':
+                return jsonify({"status": "error", "error": "No image file selected"}), 400
+            image_data = file.read()
+        else:
+            return jsonify({"status": "error", "error": "No image provided. Use JSON with base64 'image' or multipart 'image' file"}), 400
+
+        # Load scanned image
+        scanned_image = Image.open(io.BytesIO(image_data)).convert("RGB")
+
+        # Build dot-only binary mask (white dots on black) using the same training mask logic
+        mask_img = extract_dot_mask_from_scan(scanned_image, use_blob=True)
+
+        # Predict on the masked image
+        print("🧠 Predicting batch (masked)...")
+        img_tensor = preprocess_image(mask_img)
+        probs = model.predict(img_tensor)[0]
+        top_idx = int(np.argmax(probs))
+        top_label = index_to_label[top_idx]
+        confidence = float(probs[top_idx])
+
         return jsonify({
-            "status": "success",
-            "count": len(items),
-            "limit": limit,
-            "offset": offset,
-            "items": items
+            "status": "ok",
+            "predicted_label": top_label,
+            "confidence": confidence
         }), 200
+
     except Exception as e:
         return jsonify({"status": "error", "error": str(e)}), 500
+    # Accept: multipart/form-data or JSON { label_id: "...", image: base64, metadata: {...}, modified_label: {...} }
+    image_bytes = None
+    original_filename = "upload.png"
+    metadata_in = None
+    modified_label = None
+    label_id = None
+
+    if request.is_json:
+        data = request.get_json(silent=True) or {}
+        label_id = data.get("label_id")
+        if not label_id or not isinstance(label_id, str) or not label_id.strip():
+            return jsonify({"status": "error", "error": "Missing 'label_id' in JSON payload"}), 400
+
+        image_b64 = data.get("image") or data.get("image_base64")
+        if not image_b64:
+            return jsonify({"status": "error", "error": "Missing 'image' (base64) in JSON payload"}), 400
+        if isinstance(image_b64, str) and image_b64.startswith("data:image/"):
+            image_b64 = image_b64.split(",", 1)[1]
+        try:
+            image_bytes = base64.b64decode(image_b64)
+        except Exception as e:
+            return jsonify({"status": "error", "error": f"Invalid base64 image: {e}"}), 400
+
+        try:
+            metadata_in = parse_json_field(data.get("metadata"), "metadata")
+            modified_label = parse_json_field(data.get("modified_label"), "modified_label")
+        except ValueError as ve:
+            return jsonify({"status": "error", "error": str(ve)}), 400
+
+        # Also accept product/batch at top-level JSON (your client example)
+        top_product = (data.get("product") or data.get("product_name"))
+        top_batch = (data.get("batch") or data.get("batch_id") or data.get("batch_name"))
+    else:
+        # Multipart form
+        if "label_id" not in request.form:
+            return jsonify({"status": "error", "error": "Missing 'label_id' form field"}), 400
+        label_id = request.form.get("label_id")
+        if not label_id or not isinstance(label_id, str) or not label_id.strip():
+            return jsonify({"status": "error", "error": "Invalid 'label_id'"}), 400
+
+        if "image" not in request.files:
+            return jsonify({"status": "error", "error": "Missing 'image' file"}), 400
+        file = request.files["image"]
+        if file.filename == "":
+            return jsonify({"status": "error", "error": "Empty filename"}), 400
+        if not allowed_file(file.filename):
+            return jsonify({"status": "error", "error": "Unsupported file type"}), 415
+
+        original_filename = file.filename
+        image_bytes = file.read()
+
+        try:
+            metadata_in = parse_json_field(request.form.get("metadata"), "metadata")
+            modified_label = parse_json_field(request.form.get("modified_label"), "modified_label")
+        except ValueError as ve:
+            return jsonify({"status": "error", "error": str(ve)}), 400
+
+        # Also accept product/batch at top-level form
+        top_product = (request.form.get("product") or request.form.get("product_name"))
+        top_batch = (request.form.get("batch") or request.form.get("batch_id") or request.form.get("batch_name"))
+
+    # Validate image
+    if not image_bytes:
+        return jsonify({"status": "error", "error": "No image data received"}), 400
+    try:
+        pil_image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+    except Exception as e:
+        return jsonify({"status": "error", "error": f"Invalid image content: {e}"}), 400
+
+    # Determine product and batch (support both metadata and top-level variants)
+    product_name = None
+    batch_id = None
+    if isinstance(metadata_in, dict):
+        product_name = metadata_in.get("product") or metadata_in.get("product_name")
+        batch_id = metadata_in.get("batch") or metadata_in.get("batch_id") or metadata_in.get("batch_name")
+    # Fallback to top-level (JSON or form) if not present in metadata
+    if not product_name:
+        product_name = top_product
+    if not batch_id:
+        batch_id = top_batch
+
+    # Persist only folder and label_id (original image not necessarily saved to disk here)
+    saved = save_image_bytes(image_bytes, original_filename, product=product_name, batch=batch_id, label_id=label_id)
+    folder = saved["folder"]
+    original_path = saved["original_path"]  # may be None by design
+
+    # Build sanitized metadata for DB only
+    sanitized_metadata = {}
+    if isinstance(metadata_in, dict):
+        allowed_keys = {"product", "product_name", "batch", "batch_id", "batch_name", "barcode", "manufacturer", "production_date", "expiry_date", "notes"}
+        sanitized_metadata = {k: v for k, v in metadata_in.items() if k in allowed_keys and v is not None}
+
+    # 1) Apply dots to the original uploaded label and save this modified version
+    dotted_image, _summary = apply_label_modifications(pil_image, modified_label)
+    safe_product = secure_filename(product_name or "unknown_product") or "unknown_product"
+    dotted_filename = f"{safe_product}_dotted.png"
+    dotted_path = os.path.join(folder, dotted_filename)
+    dotted_image.save(dotted_path, format="PNG")
+
+    # 2) Create a base mask from the dotted image
+    mask_img = extract_dot_mask_from_scan(dotted_image, use_blob=True)
+    mask_filename = f"{safe_product}_mask.png"
+    mask_path = os.path.join(folder, mask_filename)
+    mask_img.save(mask_path, format="PNG")
+
+    # 3) Generate 20 augmented variants (noise disabled inside apply_augmentations)
+    num_variants = 20
+    variant_filenames = []
+    for i in range(1, num_variants + 1):
+        var_img = apply_augmentations(mask_img)
+        var_name = f"{safe_product}_mask_var_{i:02d}.png"
+        var_path = os.path.join(folder, var_name)
+        var_img.save(var_path, format="PNG")
+        variant_filenames.append(var_name)
+
+    saved_files = [dotted_filename, mask_filename] + variant_filenames
+
+    # 4) Prepare response (return dotted preview and list of saved files)
+    dotted_b64 = image_to_base64_png(dotted_image)
+    return jsonify({
+        "label_id": label_id,
+        "processed_image_base64": f"data:image/png;base64,{dotted_b64}",
+        "saved_folder": folder,
+        "saved_files": saved_files
+    }), 200
+
 
 # --- Training management (use training script) ---
 training_status = {
@@ -466,7 +631,7 @@ def _run_training_subprocess():
         "log": ""
     })
     try:
-        # Run the training script using only uploads (the script already set DATA_DIR='uploads')
+        # Run the training script using only uploads (the script already sets DATA_DIR='uploads')
         proc = subprocess.Popen(
             ["python3", "train_batch_classifier.py"],
             stdout=subprocess.PIPE,
@@ -508,347 +673,16 @@ def api_train():
 def api_train_status():
     return jsonify({"status": "ok", "training_status": training_status}), 200
 
-@app.route('/api/', methods=['GET'])
-def home():
-    return jsonify({
-        "message": "Batch Verification API",
-        "status": "active",
-        "endpoints": {
-            "/api/verify": "POST - Upload image for batch verification",
-            "/api/upload_label": "POST - Upload image + metadata + modified label changes",
-            "/api/uploads": "GET - List recent uploads (paginated)",
-            "/api/uploads/<label_id>": "GET - Fetch single upload by label id",
-            "/api/train": "POST - Trigger model training (uses uploads only)",
-            "/api/train/status": "GET - Check current training job status"
-        }
-    })
-
-@app.route('/api/verify', methods=['POST'])
-def verify_batch():
-    try:
-        image_data = None
-        image_base64 = None
-        label_id = None
-        # Check if it's a base64 image in JSON payload
-        if request.is_json:
-            data = request.get_json()
-            label_id = data.get("label_id")
-            if 'image' in data:
-                # Handle base64 image
-                image_base64_raw = data['image']
-                # Remove data URL prefix if present
-                if image_base64_raw.startswith('data:image/'):
-                    image_base64_raw = image_base64_raw.split(',')[1]
-                try:
-                    image_data = base64.b64decode(image_base64_raw)
-                    image_base64 = image_base64_raw
-                except Exception as e:
-                    return jsonify({
-                        "error": f"Invalid base64 image data: {str(e)}",
-                        "status": "error"
-                    }), 400
-            else:
-                return jsonify({
-                    "error": "No 'image' field found in JSON payload",
-                    "status": "error"
-                }), 400
-        # Check if image file is provided (original file upload method)
-        elif 'image' in request.files:
-            file = request.files['image']
-            label_id = request.form.get("label_id")
-            if file.filename == '':
-                return jsonify({
-                    "error": "No image file selected",
-                    "status": "error"
-                }), 400
-            # Read and process the image
-            image_data = file.read()
-            image_base64 = base64.b64encode(image_data).decode('utf-8')
-        else:
-            return jsonify({
-                "error": "No image provided. Send either a file upload or JSON with base64 'image' field",
-                "status": "error"
-            }), 400
-
-        # Convert to PIL Image for processing
-        image = Image.open(io.BytesIO(image_data))
-
-        # --- AI microdot detection gate (skip prediction if no dots) ---
-        microdots_detected = None
-        ai_detection_summary = None
-        # if image_base64:
-        #     try:
-        #         microdots_detected, ai_detection_summary = detect_dots_with_ai(image_base64)
-        #     except Exception as e:
-        #         microdots_detected, ai_detection_summary = None, f"Error: {e}"
-
-        # if microdots_detected is False:
-        #     return jsonify({
-        #         "status": "suspicious",
-        #         "reason": "No microdots detected by AI",
-        #         "predicted_batch": None,
-        #         "confidence": 0.0,
-        #         "label_id": None,
-        #         "microdots_detected": False,
-        #         "ai_detection_summary": ai_detection_summary
-        #     })
-    
-
-        # Step 2: Predict batch using CNN
-        print("🧠 Predicting batch...")
-        img_tensor = preprocess_image(image)
-        probs = model.predict(img_tensor)[0]
-        top_idx = np.argmax(probs)
-        top_batch = index_to_label[top_idx]
-        batch_confidence = float(probs[top_idx])
-
-        # Resolve label_id (from DB) based on predicted batch only
-        resolved_label_id = resolve_label_id_for_batch(top_batch)
-
-        # Suspicious if low confidence
-        if batch_confidence < 0.55:
-            return jsonify({
-                "status": "suspicious",
-                "reason": "Low batch classification confidence",
-                "predicted_batch": top_batch,
-                "confidence": batch_confidence,
-                "label_id": resolved_label_id,
-                "microdots_detected": microdots_detected,
-                "ai_detection_summary": ai_detection_summary
-            })
-        # ... existing code ...
-
-        # Successful verification: attach product metadata
-        metadata_payload = None
-        if resolved_label_id:
-            try:
-                row = fetch_upload_by_id(resolved_label_id)
-                if row:
-                    # Start with column fields
-                    metadata_payload = {
-                        "product": row.get("product"),
-                        "batch": row.get("batch"),
-                        "barcode": row.get("barcode"),
-                        "manufacturer": row.get("manufacturer"),
-                        "production_date": row.get("production_date"),
-                        "expiry_date": row.get("expiry_date"),
-                        "notes": row.get("notes"),
-                    }
-                    # Merge metadata_json without overwriting non-null column values
-                    if row.get("metadata_json"):
-                        try:
-                            md_json = json.loads(row["metadata_json"])
-                            if isinstance(md_json, dict):
-                                for k, v in md_json.items():
-                                    if metadata_payload.get(k) is None:
-                                        metadata_payload[k] = v
-                        except Exception:
-                            pass
-            except Exception:
-                metadata_payload = None
-
-        return jsonify({
-            "status": "authentic",
-            "predicted_batch": top_batch,
-            "confidence": batch_confidence,
-            "label_id": resolved_label_id,
-            "microdots_detected": microdots_detected,
-            "ai_detection_summary": ai_detection_summary,
-            "metadata": metadata_payload
-        })
-
-    except Exception as e:
-        return jsonify({
-            "error": str(e),
-            "status": "error"
-        }), 500
-
-@app.route('/api/upload_label', methods=['POST'])
-def upload_label():
-    try:
-        # Accept: multipart/form-data or JSON { label_id: "...", image: base64, metadata: {...}, modified_label: {...} }
-        image_bytes = None
-        original_filename = "upload.png"
-        metadata_in = None
-        modified_label = None
-        label_id = None
-
-        if request.is_json:
-            data = request.get_json(silent=True) or {}
-            label_id = data.get("label_id")
-            if not label_id or not isinstance(label_id, str) or not label_id.strip():
-                return jsonify({"status": "error", "error": "Missing 'label_id' in JSON payload"}), 400
-            image_b64 = data.get("image")
-            if not image_b64:
-                return jsonify({"status": "error", "error": "Missing 'image' (base64) in JSON payload"}), 400
-            if image_b64.startswith("data:image/"):
-                image_b64 = image_b64.split(",", 1)[1]
-            try:
-                image_bytes = base64.b64decode(image_b64)
-            except Exception as e:
-                return jsonify({"status": "error", "error": f"Invalid base64 image: {e}"}), 400
-
-            try:
-                metadata_in = parse_json_field(data.get("metadata"), "metadata")
-                modified_label = parse_json_field(data.get("modified_label"), "modified_label")
-            except ValueError as ve:
-                return jsonify({"status": "error", "error": str(ve)}), 400
-
-        else:
-            # Multipart form
-            if "label_id" not in request.form:
-                return jsonify({"status": "error", "error": "Missing 'label_id' form field"}), 400
-            label_id = request.form.get("label_id")
-            if not label_id or not isinstance(label_id, str) or not label_id.strip():
-                return jsonify({"status": "error", "error": "Invalid 'label_id'"}), 400
-
-            if "image" not in request.files:
-                return jsonify({"status": "error", "error": "Missing 'image' file"}), 400
-            file = request.files["image"]
-            if file.filename == "":
-                return jsonify({"status": "error", "error": "Empty filename"}), 400
-            if not allowed_file(file.filename):
-                return jsonify({"status": "error", "error": "Unsupported file type"}), 415
-
-            original_filename = file.filename
-            image_bytes = file.read()
-
-            try:
-                metadata_in = parse_json_field(request.form.get("metadata"), "metadata")
-                modified_label = parse_json_field(request.form.get("modified_label"), "modified_label")
-            except ValueError as ve:
-                return jsonify({"status": "error", "error": str(ve)}), 400
-
-        # Validate image
-        if not image_bytes:
-            return jsonify({"status": "error", "error": "No image data received"}), 400
-        try:
-            pil_image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
-        except Exception as e:
-            return jsonify({"status": "error", "error": f"Invalid image content: {e}"}), 400
-
-        # Determine product and batch (support both 'batch' and 'batch_id')
-        product_name = None
-        batch_id = None
-        if isinstance(metadata_in, dict):
-            product_name = metadata_in.get("product") or metadata_in.get("product_name")
-            batch_id = metadata_in.get("batch") or metadata_in.get("batch_id")
-
-        # Store only folder and label_id (do NOT save original to disk)
-        saved = save_image_bytes(image_bytes, original_filename, product=product_name, batch=batch_id, label_id=label_id)
-        folder = saved["folder"]
-        original_path = saved["original_path"]  # remains None
-
-        # Build sanitized metadata for DB only (no metadata.json file)
-        sanitized_metadata = {}
-        if metadata_in:
-            allowed_keys = {"product", "batch", "barcode", "manufacturer", "production_date", "expiry_date", "notes"}
-            sanitized_metadata = {k: v for k, v in metadata_in.items() if k in allowed_keys and v is not None}
-
-        # Apply label modifications (visible microdots)
-        processed_img, mod_summary = apply_label_modifications(pil_image, modified_label)
-
-        # Use product name in filenames
-        safe_product = secure_filename(product_name or "unknown_product") or "unknown_product"
-        base_filename = f"{safe_product}_dot.png"
-        base_path = os.path.join(folder, base_filename)
-
-        # Save base processed image
-        processed_img.save(base_path, format="PNG")
-
-        # Create variations
-        cv2_base = cv2.cvtColor(np.array(processed_img), cv2.COLOR_RGB2BGR)
-        for i in range(VARIATIONS_COUNT):
-            var_img = generate_variation(cv2_base, i)
-            var_filename = f"{safe_product}_dot_var_{i+1:02d}.png"
-            var_path = os.path.join(folder, var_filename)
-            cv2.imwrite(var_path, var_img)
-
-        # Return processed image as base64 (of the base processed image)
-        processed_b64 = image_to_base64_png(processed_img)
-
-        # Persist to SQLite (original_path is None; processed_path = base image)
-        save_upload_record(
-            label_id=label_id,
-            product=product_name,
-            batch=batch_id,
-            sanitized_metadata=sanitized_metadata,
-            original_path=original_path,
-            processed_path=base_path
-        )
-
-        return jsonify({
-            "label_id": label_id,
-            "processed_image_base64": f"data:image/png;base64,{processed_b64}"
-        }), 200
-
-    except Exception as e:
-        return jsonify({"status": "error", "error": str(e)}), 500
-
-def resolve_label_id_for_prediction(predicted_label: str) -> str | None:
-    """
-    Resolve a label_id (stored as upload_id in DB) from the predicted label.
-    If label format is 'PRODUCT::BATCH', match both; otherwise match by batch only.
-    Returns the most recent matching record, or None if not found.
-    """
-    product = None
-    batch = predicted_label
-    if "::" in predicted_label:
-        parts = predicted_label.split("::", 1)
-        product = parts[0].strip() or None
-        batch = parts[1].strip() if len(parts) > 1 else predicted_label
-
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    try:
-        if product:
-            cur = conn.execute(
-                """SELECT upload_id FROM uploads
-                   WHERE batch = ? AND product = ?
-                   ORDER BY datetime(created_at) DESC
-                   LIMIT 1""",
-                (batch, product)
-            )
-            row = cur.fetchone()
-            if row:
-                return row["upload_id"]
-
-        # Fallback: match by batch only
-        cur = conn.execute(
-            """SELECT upload_id FROM uploads
-               WHERE batch = ?
-               ORDER BY datetime(created_at) DESC
-               LIMIT 1""",
-            (batch,)
-        )
-        row = cur.fetchone()
-        return row["upload_id"] if row else None
-    finally:
-        conn.close()
-
-def resolve_label_id_for_batch(batch: str) -> str | None:
-    """
-    Resolve a label_id (stored as upload_id in DB) from the predicted batch.
-    Returns the most recent matching record, or None if not found.
-    """
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    try:
-        cur = conn.execute(
-            """SELECT upload_id FROM uploads
-               WHERE batch = ?
-               ORDER BY datetime(created_at) DESC
-               LIMIT 1""",
-            (batch,)
-        )
-        row = cur.fetchone()
-        return row["upload_id"] if row else None
-    finally:
-        conn.close()
 
 if __name__ == "__main__":
     host = os.getenv("FLASK_RUN_HOST", "0.0.0.0")
     port = int(os.getenv("PORT", os.getenv("FLASK_RUN_PORT", "8080")))
     debug = os.getenv("FLASK_DEBUG", "0") == "1"
     print(f"Starting Flask app on {host}:{port} (debug={debug})")
+    print("Registered URL map:")
+    for r in app.url_map.iter_rules():
+        print(f" - {r} [{', '.join(sorted(list(r.methods)))}]")
     app.run(host=host, port=port, debug=debug)
+
+
+ 
