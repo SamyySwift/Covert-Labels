@@ -4,8 +4,7 @@
 **/uploads
 fly.toml
 images/*
-app/images/
-app/models/
+
 
 __pycache__/
 *.pyc

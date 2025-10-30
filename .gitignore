@@ -8,3 +8,5 @@ clg_output_images
 *.jpg
 fly.toml
 batch_classifier_model.keras
+other
+imgs
