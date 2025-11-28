@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Ensure volume structure
-mkdir -p /data /data/uploads /data/autoencoder_outputs
+mkdir -p /data /data/autoencoder_outputs /data/GENUINE_IMAGE_DIR
 mkdir -p /app/autoencoder_outputs
 
 # Link model and thresholds from volume into app paths expected by flask_app.py

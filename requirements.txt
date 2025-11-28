@@ -6,5 +6,5 @@ openai
 python-dotenv
 gunicorn
 flask-cors
-opencv-python
+opencv-python-headless
 scikit-learn

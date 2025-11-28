@@ -1,0 +1,9 @@
+{
+  "id": "28c8e887698d4c47b58f50bb6588ed8d",
+  "state": "finished",
+  "started_at": "2025-10-30T13:32:57.150191Z",
+  "finished_at": "2025-10-30T13:40:11.988414Z",
+  "returncode": 0,
+  "error": null,
+  "log_path": "/Users/samswift/Documents/Development/Artificial Intelligence/AI React Apps/covert labels/runtime/training_runs/28c8e887698d4c47b58f50bb6588ed8d/train.log"
+}

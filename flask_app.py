@@ -23,6 +23,7 @@ from train_autoencoder import (
     IMG_SIZE,  # use the same size as training
 )
 
+
 app = Flask(__name__)
 CORS(app)
 
@@ -99,6 +100,13 @@ def load_threshold(path: str) -> float:
     with open(path, "r") as f:
         return float(f.read().strip())
 
+
+def pil_to_data_url(img: Image.Image, format: str = "JPEG") -> str:
+    buf = io.BytesIO()
+    img.save(buf, format=format)
+    b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
+    mime = "image/jpeg" if format.upper() == "JPEG" else f"image/{format.lower()}"
+    return f"data:{mime};base64,{b64}"
 
 # Model cache to avoid repeated loads
 _model_lock = threading.Lock()
@@ -242,9 +250,9 @@ def get_training_status(training_id: Optional[str] = None) -> Dict[str, Any]:
 
 
 # ------------------ API ENDPOINTS --------------------------
-@app.route("/", methods=["GET"])
+@app.route("/api", methods=["GET"])
 def health():
-    return jsonify({"status": "ok"}), 200
+    return jsonify({"status": "API is running..."}), 200
 
 
 @app.route("/api/upload", methods=["POST"])
@@ -354,7 +362,6 @@ def verify():
     try:
         # Load model and thresholds once (cached)
         model, global_thr, patch_thr = get_model_and_thresholds()
-
         # Decode image to PIL in-memory (no temp file)
         pil_img = None
         if request.is_json:
@@ -382,14 +389,20 @@ def verify():
             else min(1.0, float(max(g_loss / max(global_thr, 1e-8), p_max / max(patch_thr, 1e-8))))
         )
 
-        # Optional: LLM-based inspection
-        api_key = _get_openrouter_api_key()
+        # Optional: LLM-based inspection (safe if key missing)
+        api_key = None
+        try:
+            api_key = _get_openrouter_api_key()
+        except ValueError:
+            api_key = None
+
         llm_status = ae_status
         llm_conf = ae_confidence
         llm_details: Dict[str, Any] = {}
         if api_key:
-            llm_status, llm_conf, llm_details = llm_inspect_image("in-memory")
-            min_conf = float(os.getenv("LLM_OVERRIDE_MIN_CONF", "0.75"))
+            data_url = pil_to_data_url(pil_img, format="JPEG")
+            llm_status, llm_conf, llm_details = llm_inspect_image(data_url)
+            min_conf = 0.7
             if llm_status != ae_status and llm_conf >= min_conf:
                 final_status = llm_status
                 source = "LLM (override)"
@@ -402,9 +415,8 @@ def verify():
 
         return jsonify({
             "status": final_status,
-            # "confidence": float(max(ae_confidence, llm_conf)),
-            # "metrics": {"global_loss": g_loss, "patch_max": p_max},
-            # "details": {"path": "in-memory", "source": source, "llm": llm_details},
+            "details": llm_details,
+            "ae": ae_status,
         }), 200
 
     except ValueError as e:
@@ -420,18 +432,21 @@ def _get_openrouter_api_key() -> str:
         raise ValueError("OPENROUTER_API_KEY is not set. Add it to environment or .env.")
     return key
 
-def llm_inspect_image(image_path: str) -> tuple[str, float, dict | str]:
+def llm_inspect_image(image_input: str) -> tuple[str, float, dict | str]:
     """
     Calls OpenRouter to classify the image as 'normal' or 'suspicious'.
+    Accepts either a file path or a base64 data URL.
     Returns (classification, confidence, raw_json_or_text).
-    Applies LLM_SUSPICIOUS_THRESHOLD (default 0.7) and requires evidence list for 'suspicious'.
     """
     api_key = _get_openrouter_api_key()
     client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=api_key)
 
-    with open(image_path, "rb") as f:
-        b64 = base64.b64encode(f.read()).decode("utf-8")
-    data_url = f"data:image/jpeg;base64,{b64}"
+    if isinstance(image_input, str) and image_input.startswith("data:image/"):
+        data_url = image_input
+    else:
+        with open(image_input, "rb") as f:
+            b64 = base64.b64encode(f.read()).decode("utf-8")
+        data_url = f"data:image/jpeg;base64,{b64}"
 
     prompt_text = (
         "Task: Verify product label authenticity.\n"
@@ -447,7 +462,7 @@ def llm_inspect_image(image_path: str) -> tuple[str, float, dict | str]:
     )
 
     completion = client.chat.completions.create(
-        model="meta-llama/llama-4-maverick:free",
+        model="google/gemini-2.5-flash-image",
         messages=[
             {
                 "role": "user",
@@ -465,7 +480,7 @@ def llm_inspect_image(image_path: str) -> tuple[str, float, dict | str]:
         classification = str(data.get("classification", "normal")).lower().strip()
         confidence = float(data.get("confidence", 0.5))
         evidence = data.get("evidence", []) or []
-        threshold = float(os.getenv("LLM_SUSPICIOUS_THRESHOLD", "0.7"))
+        threshold = 0.7
         if classification == "suspicious" and (confidence < threshold or len(evidence) == 0):
             classification = "normal"
         return classification, confidence, data
