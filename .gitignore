@@ -10,3 +10,5 @@ fly.toml
 batch_classifier_model.keras
 other
 imgs
+GENUINE_IMAGE_DIR
+runtime

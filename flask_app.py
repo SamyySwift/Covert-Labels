@@ -12,6 +12,7 @@ import numpy as np
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from PIL import Image
+import cv2
 
 from openai import OpenAI  # added for LLM verification
 import tensorflow as tf
@@ -34,6 +35,8 @@ OUTPUT_DIR = os.getenv("AUTOENCODER_OUTPUT_DIR") or os.path.join(PROJECT_ROOT, "
 MODEL_PATH = os.getenv("MODEL_PATH") or os.path.join(PROJECT_ROOT, "autoencoder_genuine.keras")
 THRESH_GLOBAL_PATH = os.path.join(OUTPUT_DIR, "anomaly_threshold.txt")
 THRESH_PATCH_PATH = os.path.join(OUTPUT_DIR, "anomaly_threshold_patch.txt")
+THRESH_PATCH_PATH_8 = os.path.join(OUTPUT_DIR, "anomaly_threshold_patch_ps8.txt")
+THRESH_PATCH_PATH_32 = os.path.join(OUTPUT_DIR, "anomaly_threshold_patch_ps32.txt")
 PATCH_THRESHOLD_DEFAULT = 0.02
 RUNTIME_DIR = os.path.join(PROJECT_ROOT, "runtime")
 
@@ -113,10 +116,12 @@ _model_lock = threading.Lock()
 _model_cached: Optional[tf.keras.Model] = None
 _global_threshold: Optional[float] = None
 _patch_threshold: Optional[float] = None
+_patch_threshold_8: Optional[float] = None
+_patch_threshold_32: Optional[float] = None
 
 
-def get_model_and_thresholds() -> tuple[tf.keras.Model, float, float]:
-    global _model_cached, _global_threshold, _patch_threshold
+def get_model_and_thresholds() -> tuple[tf.keras.Model, float, float, float, float]:
+    global _model_cached, _global_threshold, _patch_threshold, _patch_threshold_8, _patch_threshold_32
     with _model_lock:
         if _model_cached is None:
             if not os.path.isfile(MODEL_PATH):
@@ -133,9 +138,19 @@ def get_model_and_thresholds() -> tuple[tf.keras.Model, float, float]:
                 _patch_threshold = load_threshold(THRESH_PATCH_PATH)
             except FileNotFoundError:
                 _patch_threshold = PATCH_THRESHOLD_DEFAULT
-        return _model_cached, _global_threshold, _patch_threshold
+        if _patch_threshold_8 is None:
+            try:
+                _patch_threshold_8 = load_threshold(THRESH_PATCH_PATH_8)
+            except FileNotFoundError:
+                _patch_threshold_8 = PATCH_THRESHOLD_DEFAULT
+        if _patch_threshold_32 is None:
+            try:
+                _patch_threshold_32 = load_threshold(THRESH_PATCH_PATH_32)
+            except FileNotFoundError:
+                _patch_threshold_32 = PATCH_THRESHOLD_DEFAULT
+        return _model_cached, _global_threshold, _patch_threshold, _patch_threshold_8, _patch_threshold_32
 
-def _detect_image_anomaly_from_pil(model: tf.keras.Model, pil_img: Image.Image, global_threshold: float, patch_threshold: float, patch_size: int = 16) -> tuple[bool, float, float]:
+def _detect_image_anomaly_from_pil(model: tf.keras.Model, pil_img: Image.Image, global_threshold: float, patch_thr16: float, patch_thr8: float, patch_thr32: float) -> tuple[bool, float, float, float, float]:
     img = pil_img.resize((IMG_SIZE, IMG_SIZE))
     img_np = np.asarray(img, dtype=np.float32) / 255.0
     x_img = tf.expand_dims(img_np, axis=0)
@@ -145,11 +160,20 @@ def _detect_image_anomaly_from_pil(model: tf.keras.Model, pil_img: Image.Image, 
     global_loss = float(tf.reduce_mean(tf.square(diff), axis=(1, 2, 3))[0].numpy())
 
     sq = tf.square(diff)
-    pools = tf.nn.avg_pool(sq, ksize=[1, patch_size, patch_size, 1], strides=[1, patch_size, patch_size, 1], padding="VALID")
-    local_max = float(tf.reduce_max(pools).numpy())
+    pools16 = tf.nn.avg_pool(sq, ksize=[1, 16, 16, 1], strides=[1, 16, 16, 1], padding="VALID")
+    pools8 = tf.nn.avg_pool(sq, ksize=[1, 8, 8, 1], strides=[1, 8, 8, 1], padding="VALID")
+    pools32 = tf.nn.avg_pool(sq, ksize=[1, 32, 32, 1], strides=[1, 32, 32, 1], padding="VALID")
+    local_max16 = float(tf.reduce_max(pools16).numpy())
+    local_max8 = float(tf.reduce_max(pools8).numpy())
+    local_max32 = float(tf.reduce_max(pools32).numpy())
 
-    is_anom = (global_loss > global_threshold) or (local_max > patch_threshold)
-    return is_anom, global_loss, local_max
+    is_anom = (
+        (global_loss > global_threshold) or
+        (local_max16 > patch_thr16) or
+        (local_max8 > patch_thr8) or
+        (local_max32 > patch_thr32)
+    )
+    return is_anom, global_loss, local_max16, local_max8, local_max32
 
 
 # Training manager for concurrency + status tracking
@@ -361,7 +385,7 @@ def verify():
     """
     try:
         # Load model and thresholds once (cached)
-        model, global_thr, patch_thr = get_model_and_thresholds()
+        model, global_thr, patch_thr16, patch_thr8, patch_thr32 = get_model_and_thresholds()
         # Decode image to PIL in-memory (no temp file)
         pil_img = None
         if request.is_json:
@@ -378,45 +402,74 @@ def verify():
         else:
             return jsonify({"error": "Unsupported content type or missing 'image'"}), 415
 
-        # In-memory anomaly detection
-        is_anom, g_loss, p_max = _detect_image_anomaly_from_pil(
-            model, pil_img, global_threshold=global_thr, patch_threshold=patch_thr, patch_size=16
-        )
-        ae_status = "suspicious" if is_anom else "normal"
-        ae_confidence = (
-            min(1.0, float(g_loss / max(global_thr, 1e-8)))
-            if not is_anom
-            else min(1.0, float(max(g_loss / max(global_thr, 1e-8), p_max / max(patch_thr, 1e-8))))
-        )
-
-        # Optional: LLM-based inspection (safe if key missing)
-        api_key = None
+        # Pre-gate to flag non-product/occluded/typo images (LLM + CV)
+        gate_results = []
+        triggered = False
+        method = "AE"
+        # LLM gate
         try:
-            api_key = _get_openrouter_api_key()
-        except ValueError:
-            api_key = None
-
-        llm_status = ae_status
-        llm_conf = ae_confidence
-        llm_details: Dict[str, Any] = {}
-        if api_key:
+            _ = _get_openrouter_api_key()
             data_url = pil_to_data_url(pil_img, format="JPEG")
-            llm_status, llm_conf, llm_details = llm_inspect_image(data_url)
-            min_conf = 0.7
-            if llm_status != ae_status and llm_conf >= min_conf:
-                final_status = llm_status
-                source = "LLM (override)"
-            else:
-                final_status = ae_status
-                source = "AE (retained)"
-        else:
-            final_status = ae_status
-            source = "AE"
+            g_status, g_conf, g_details = llm_inspect_image(data_url)
+            gate_results.append({"source": "LLM", "status": g_status, "confidence": g_conf, "details": g_details})
+            if g_status == "suspicious" and g_conf >= 0.6:
+                triggered = True
+                method = "LLM_GATE"
+        except Exception:
+            pass
+        # CV gate (paper/occlusion heuristic)
+        try:
+            arr = np.asarray(pil_img)
+            h, w = arr.shape[:2]
+            x1, x2 = int(0.2 * w), int(0.8 * w)
+            y1, y2 = int(0.25 * h), int(0.75 * h)
+            roi = arr[y1:y2, x1:x2]
+            hsv = cv2.cvtColor(roi, cv2.COLOR_RGB2HSV)
+            white_mask = (hsv[...,1] < 40) & (hsv[...,2] > 200)
+            white_ratio = float(np.mean(white_mask))
+            edges = cv2.Canny(cv2.cvtColor(roi, cv2.COLOR_RGB2GRAY), 100, 200)
+            edge_ratio = float(np.mean(edges > 0))
+            cv_suspicious = (white_ratio > 0.35) or (edge_ratio < 0.01)
+            cv_conf = float(min(1.0, max(white_ratio * 2.0, (0.02 - edge_ratio) * 50.0))) if cv_suspicious else float(max(0.0, 0.3 - white_ratio))
+            gate_results.append({"source": "CV", "status": "suspicious" if cv_suspicious else "normal", "confidence": cv_conf, "details": {"white_ratio": white_ratio, "edge_ratio": edge_ratio}})
+            if cv_suspicious and cv_conf >= 0.6 and not triggered:
+                triggered = True
+                method = "CV_GATE"
+        except Exception:
+            pass
+
+        if triggered:
+            return jsonify({
+                "status": "suspicious",
+                "confidence": max(r.get("confidence", 0.0) for r in gate_results) if gate_results else 1.0,
+                "method": method,
+                "gate": gate_results,
+            }), 200
+
+        # In-memory anomaly detection
+        is_anom, g_loss, p16, p8, p32 = _detect_image_anomaly_from_pil(
+            model, pil_img, global_threshold=global_thr, patch_thr16=patch_thr16, patch_thr8=patch_thr8, patch_thr32=patch_thr32
+        )
+        suspicious_score = float(max(
+            g_loss / max(global_thr, 1e-8),
+            p16 / max(patch_thr16, 1e-8),
+            p8 / max(patch_thr8, 1e-8),
+            p32 / max(patch_thr32, 1e-8)
+        ))
+        ae_status = "suspicious" if suspicious_score > 1.0 else "normal"
+        ae_confidence = float(min(1.0, suspicious_score)) if ae_status == "suspicious" else float(1.0 - min(1.0, suspicious_score))
+
+        final_status = ae_status
+        final_confidence = ae_confidence
+        source = "AE"
 
         return jsonify({
             "status": final_status,
-            "details": llm_details,
-            "ae": ae_status,
+            "confidence": final_confidence,
+            "metrics": {"global_loss": g_loss, "patch_max": {"ps8": p8, "ps16": p16, "ps32": p32}},
+            "thresholds": {"global": global_thr, "patch": {"ps8": patch_thr8, "ps16": patch_thr16, "ps32": patch_thr32}},
+            "method": source,
+            "ae": {"status": ae_status, "confidence": ae_confidence},
         }), 200
 
     except ValueError as e:
@@ -449,16 +502,16 @@ def llm_inspect_image(image_input: str) -> tuple[str, float, dict | str]:
         data_url = f"data:image/jpeg;base64,{b64}"
 
     prompt_text = (
-        "Task: Verify product label authenticity.\n"
+        "Task: Gate images before autoencoder verification.\n"
         "Output STRICT JSON only (no prose): "
         '{"classification":"normal|suspicious","confidence":0.0-1.0,"evidence":["..."]}.\n'
         "Rules:\n"
-        "- Return 'suspicious' ONLY if you identify at least one concrete, localized indicator visible in the image "
-        "(e.g., misspelling, glyph/kerning mismatch, logo shape inconsistency, color code mismatch, misalignment, "
-        "obvious manipulation artifacts like warping/ghosting).\n"
-        "- If uncertain or evidence is not clearly visible, return 'normal'. Do not guess.\n"
-        "- Confidence: multiple clear indicators ≥0.9; one clear indicator ≈0.7–0.85; minor noise/compression ≤0.3.\n"
-        "- Include short evidence strings; avoid generic statements.\n"
+        "- Return 'suspicious' if the image is not a real photo of a physical product label (e.g., website/app screenshot, graphic mockup, rendering).\n"
+        "- Return 'suspicious' if the label is obscured or covered (paper overlay, tape, hand), severely cropped, unreadable due to heavy blur/glare).\n"
+        "- Return 'suspicious' if you detect text typos or brand word mismatches on the primary label.\n"
+        "- Otherwise return 'normal'. Do not guess.\n"
+        "- Confidence: multiple clear indicators ≥0.9; one clear indicator ≈0.7–0.85; minor concerns ≤0.3.\n"
+        "- Provide short evidence strings referencing visible cues.\n"
     )
 
     completion = client.chat.completions.create(
@@ -501,7 +554,6 @@ def llm_inspect_image(image_input: str) -> tuple[str, float, dict | str]:
 if __name__ == "__main__":
     # Dev server
     app.run(host="0.0.0.0", port=8080, debug=True)
-
 
 
 

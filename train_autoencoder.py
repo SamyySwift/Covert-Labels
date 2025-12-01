@@ -35,55 +35,29 @@ def load_and_preprocess(path: tf.Tensor, img_size: int, channels: int = 3) -> tf
     img = tf.image.resize(img, [img_size, img_size])
     return img
 
-def build_datasets(image_dir: str, img_size: int, batch_size: int, val_split: float,
-                    limit: int | None, seed: int = 42):
-
-    # Collect files robustly (recursive) and normalize to absolute paths
+def build_datasets(image_dir: str, img_size: int, batch_size: int, val_split: float, limit: int | None, seed: int = 42):
     all_files = collect_image_paths(image_dir)
     if limit is not None and limit > 0:
         all_files = all_files[:limit]
-
     num_files = len(all_files)
-    # Robust recursive, case-insensitive file discovery
-    valid_exts = (".png", ".jpg", ".jpeg")
-    discovered_files = []
-    for root, _, files in os.walk(image_dir):
-        for fname in files:
-            if fname.lower().endswith(valid_exts):
-                discovered_files.append(os.path.join(root, fname))
-    if len(discovered_files) == 0:
-        raise RuntimeError(f"No image files found under {os.path.abspath(image_dir)}. Ensure it contains .png/.jpg/.jpeg.")
-
-   
     train_count = int(num_files * (1.0 - val_split))
     if num_files > 1:
         train_count = max(1, min(train_count, num_files - 1))
     else:
         train_count = 1
-
-    # Build dataset from file paths
+    def augment_tf(img: tf.Tensor) -> tf.Tensor:
+        img = tf.image.random_brightness(img, max_delta=0.05)
+        img = tf.image.random_contrast(img, lower=0.9, upper=1.1)
+        img = tf.image.random_saturation(img, lower=0.9, upper=1.1)
+        noise = tf.random.normal(tf.shape(img), mean=0.0, stddev=0.02, dtype=img.dtype)
+        img = tf.clip_by_value(img + noise, 0.0, 1.0)
+        img = tf.image.random_flip_left_right(img)
+        return img
     files_ds = tf.data.Dataset.from_tensor_slices(all_files)
-
-    dataset_img = files_ds.map(lambda p: load_and_preprocess(p, img_size),
-                               num_parallel_calls=tf.data.AUTOTUNE)
-
-    # Train/val splits on images (no vectorization)
-    train_img_ds = dataset_img.take(train_count).shuffle(2048, seed=seed).batch(batch_size).prefetch(tf.data.AUTOTUNE)
+    dataset_img = files_ds.map(lambda p: load_and_preprocess(p, img_size), num_parallel_calls=tf.data.AUTOTUNE)
+    train_img_ds = dataset_img.take(train_count).map(augment_tf, num_parallel_calls=tf.data.AUTOTUNE).shuffle(2048, seed=seed).batch(batch_size).prefetch(tf.data.AUTOTUNE)
     val_img_ds = dataset_img.skip(train_count).batch(batch_size).prefetch(tf.data.AUTOTUNE)
-
-    # Return image datasets; keep signature shape
     return train_img_ds, val_img_ds, val_img_ds, num_files
-
-    # Vectorize for Dense model
-    input_dim = img_size * img_size * CHANNELS
-    dataset_vec = dataset_img.map(lambda img: tf.reshape(img, [input_dim]),
-                                  num_parallel_calls=tf.data.AUTOTUNE)
-
-    train_vec_ds = dataset_vec.take(train_count).shuffle(2048, seed=seed).batch(batch_size).prefetch(tf.data.AUTOTUNE)
-    val_vec_ds = dataset_vec.skip(train_count).batch(batch_size).prefetch(tf.data.AUTOTUNE)
-    val_img_ds = dataset_img.skip(train_count).batch(batch_size).prefetch(tf.data.AUTOTUNE)
-
-    return train_vec_ds, val_vec_ds, val_img_ds, num_files
 
 
 
@@ -133,32 +107,58 @@ class AnomalyDetector(tf.keras.Model):
         self.channels = channels
         self.latent_channels = latent_channels
         L = tf.keras.layers
-        
-        # Improved encoder with skip connections and less aggressive downsampling
-        self.encoder = tf.keras.Sequential([
-            L.InputLayer(input_shape=(img_size, img_size, channels)),
-            L.Conv2D(64, 3, strides=1, padding="same", activation="relu"),
-            L.Conv2D(64, 3, strides=2, padding="same", activation="relu"),  # 224→112
-            L.Conv2D(128, 3, strides=1, padding="same", activation="relu"),
-            L.Conv2D(128, 3, strides=2, padding="same", activation="relu"), # 112→56
-            L.Conv2D(256, 3, strides=1, padding="same", activation="relu"),
-            L.Conv2D(latent_channels, 3, strides=2, padding="same", activation="relu"), # 56→28
-        ], name="encoder")
-
-        # Improved decoder with more layers
-        self.decoder = tf.keras.Sequential([
-            tf.keras.layers.Conv2DTranspose(256, 3, strides=2, padding="same", activation="relu"), # 28→56
-            tf.keras.layers.Conv2D(256, 3, strides=1, padding="same", activation="relu"),
-            tf.keras.layers.Conv2DTranspose(128, 3, strides=2, padding="same", activation="relu"), # 56→112
-            tf.keras.layers.Conv2D(128, 3, strides=1, padding="same", activation="relu"),
-            tf.keras.layers.Conv2DTranspose(64, 3, strides=2, padding="same", activation="relu"),  # 112→224
-            tf.keras.layers.Conv2D(64, 3, strides=1, padding="same", activation="relu"),
-            tf.keras.layers.Conv2D(channels, 3, padding="same", activation="sigmoid"),  # align with [0,1] inputs
-        ], name="decoder")
+        self.conv1a = L.Conv2D(64, 3, strides=1, padding="same", use_bias=False)
+        self.bn1a = L.BatchNormalization()
+        self.act1a = L.ReLU()
+        self.conv1b = L.Conv2D(64, 3, strides=2, padding="same", use_bias=False)
+        self.bn1b = L.BatchNormalization()
+        self.act1b = L.ReLU()
+        self.conv2a = L.Conv2D(128, 3, strides=1, padding="same", use_bias=False)
+        self.bn2a = L.BatchNormalization()
+        self.act2a = L.ReLU()
+        self.conv2b = L.Conv2D(128, 3, strides=2, padding="same", use_bias=False)
+        self.bn2b = L.BatchNormalization()
+        self.act2b = L.ReLU()
+        self.conv3a = L.Conv2D(256, 3, strides=1, padding="same", use_bias=False)
+        self.bn3a = L.BatchNormalization()
+        self.act3a = L.ReLU()
+        self.conv3b = L.Conv2D(latent_channels, 3, strides=2, padding="same", use_bias=False)
+        self.bn3b = L.BatchNormalization()
+        self.act3b = L.ReLU()
+        self.up1 = L.Conv2DTranspose(256, 3, strides=2, padding="same", use_bias=False)
+        self.bn_up1 = L.BatchNormalization()
+        self.act_up1 = L.ReLU()
+        self.merge1 = L.Concatenate()
+        self.conv_up1b = L.Conv2D(256, 3, strides=1, padding="same", activation="relu")
+        self.up2 = L.Conv2DTranspose(128, 3, strides=2, padding="same", use_bias=False)
+        self.bn_up2 = L.BatchNormalization()
+        self.act_up2 = L.ReLU()
+        self.merge2 = L.Concatenate()
+        self.conv_up2b = L.Conv2D(128, 3, strides=1, padding="same", activation="relu")
+        self.up3 = L.Conv2DTranspose(64, 3, strides=2, padding="same", use_bias=False)
+        self.bn_up3 = L.BatchNormalization()
+        self.act_up3 = L.ReLU()
+        self.merge3 = L.Concatenate()
+        self.conv_up3b = L.Conv2D(64, 3, strides=1, padding="same", activation="relu")
+        self.out_conv = L.Conv2D(channels, 3, padding="same", activation="sigmoid")
 
     def call(self, x):
-        z = self.encoder(x)
-        y = self.decoder(z)
+        c1 = self.act1a(self.bn1a(self.conv1a(x)))
+        d1 = self.act1b(self.bn1b(self.conv1b(c1)))
+        c2 = self.act2a(self.bn2a(self.conv2a(d1)))
+        d2 = self.act2b(self.bn2b(self.conv2b(c2)))
+        c3 = self.act3a(self.bn3a(self.conv3a(d2)))
+        z = self.act3b(self.bn3b(self.conv3b(c3)))
+        u1 = self.act_up1(self.bn_up1(self.up1(z)))
+        u1 = self.merge1([u1, c3])
+        u1 = self.conv_up1b(u1)
+        u2 = self.act_up2(self.bn_up2(self.up2(u1)))
+        u2 = self.merge2([u2, c2])
+        u2 = self.conv_up2b(u2)
+        u3 = self.act_up3(self.bn_up3(self.up3(u2)))
+        u3 = self.merge3([u3, c1])
+        u3 = self.conv_up3b(u3)
+        y = self.out_conv(u3)
         return y
 
     def get_config(self):
@@ -176,23 +176,21 @@ class AnomalyDetector(tf.keras.Model):
         return cls(**kwargs)
 
 def reconstruction_mse(x_true: tf.Tensor, x_pred: tf.Tensor) -> tf.Tensor:
-    # Per-image mean squared error across H, W, C
     return tf.reduce_mean(tf.math.squared_difference(x_true, x_pred), axis=(1, 2, 3))
 
-# NEW: per-pixel MSE map and patch-wise max
 def mse_map(x_true: tf.Tensor, x_pred: tf.Tensor) -> tf.Tensor:
-    # [B,H,W] mean over channels
     return tf.reduce_mean(tf.math.squared_difference(x_true, x_pred), axis=3)
 
 def patch_max_mse(x_true: tf.Tensor, x_pred: tf.Tensor, patch_size: int = 16) -> tf.Tensor:
-    # Compute average MSE per patch then take max across patches per image
-    m = mse_map(x_true, x_pred)                         # [B,H,W]
-    m = tf.expand_dims(m, axis=-1)                      # [B,H,W,1]
-    pooled = tf.nn.avg_pool(m,
-                            ksize=[1, patch_size, patch_size, 1],
-                            strides=[1, patch_size, patch_size, 1],
-                            padding="SAME")             # [B,H/ps,W/ps,1]
-    return tf.reduce_max(pooled, axis=(1, 2))           # [B]
+    m = mse_map(x_true, x_pred)
+    m = tf.expand_dims(m, axis=-1)
+    pooled = tf.nn.avg_pool(m, ksize=[1, patch_size, patch_size, 1], strides=[1, patch_size, patch_size, 1], padding="SAME")
+    return tf.reduce_max(pooled, axis=(1, 2))
+
+def mixed_loss(y_true: tf.Tensor, y_pred: tf.Tensor) -> tf.Tensor:
+    mse = tf.reduce_mean(tf.math.squared_difference(y_true, y_pred), axis=(1, 2, 3))
+    ssim = tf.image.ssim(y_true, y_pred, max_val=1.0)
+    return tf.reduce_mean(0.5 * mse + 0.5 * (1.0 - ssim))
 
 def compute_threshold(autoencoder: tf.keras.Model, val_img_ds: tf.data.Dataset, percentile: float = 95.0) -> float:
     losses = []
@@ -220,7 +218,8 @@ def compute_threshold_patch(autoencoder: tf.keras.Model, val_img_ds: tf.data.Dat
         raise RuntimeError("Validation set empty; cannot compute patch anomaly threshold.")
     threshold = float(np.percentile(losses, percentile))
     os.makedirs(OUTPUT_DIR, exist_ok=True)
-    with open(os.path.join(OUTPUT_DIR, "anomaly_threshold_patch.txt"), "w") as f:
+    fname = "anomaly_threshold_patch.txt" if patch_size == 16 else f"anomaly_threshold_patch_ps{patch_size}.txt"
+    with open(os.path.join(OUTPUT_DIR, fname), "w") as f:
         f.write(str(threshold))
     print(f"🔎 Computed patch anomaly threshold (P{percentile:.0f}, ps={patch_size}): {threshold:.6f}")
     return threshold
@@ -491,7 +490,7 @@ def main():
     print(f"Total images: {num_files}")
 
     autoencoder = AnomalyDetector(img_size=IMG_SIZE, channels=CHANNELS, latent_channels=256)
-    autoencoder.compile(optimizer="adam", loss="mse")
+    autoencoder.compile(optimizer="adam", loss=mixed_loss)
 
     # Build submodules by calling once, so summary shows params
     _ = autoencoder(tf.zeros((1, IMG_SIZE, IMG_SIZE, CHANNELS), dtype=tf.float32))
@@ -534,8 +533,9 @@ def main():
     # Use a more lenient percentile via env (default 95)
     anomaly_percentile = float(os.getenv("ANOMALY_PERCENTILE", "95"))
     threshold = compute_threshold(autoencoder, val_img_ds, percentile=anomaly_percentile)
-    # Save patch-level threshold for sensitive detection
-    patch_threshold = compute_threshold_patch(autoencoder, val_img_ds, percentile=95.0, patch_size=16)
+    patch_threshold_16 = compute_threshold_patch(autoencoder, val_img_ds, percentile=95.0, patch_size=16)
+    patch_threshold_8 = compute_threshold_patch(autoencoder, val_img_ds, percentile=95.0, patch_size=8)
+    patch_threshold_32 = compute_threshold_patch(autoencoder, val_img_ds, percentile=95.0, patch_size=32)
 
    
 
