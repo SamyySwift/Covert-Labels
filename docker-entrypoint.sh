@@ -15,9 +15,15 @@ fi
 if [ -f /data/autoencoder_outputs/anomaly_threshold_patch.txt ]; then
   ln -sf /data/autoencoder_outputs/anomaly_threshold_patch.txt /app/autoencoder_outputs/anomaly_threshold_patch.txt
 fi
+if [ -f /data/autoencoder_outputs/anomaly_threshold_patch_ps8.txt ]; then
+  ln -sf /data/autoencoder_outputs/anomaly_threshold_patch_ps8.txt /app/autoencoder_outputs/anomaly_threshold_patch_ps8.txt
+fi
+if [ -f /data/autoencoder_outputs/anomaly_threshold_patch_ps32.txt ]; then
+  ln -sf /data/autoencoder_outputs/anomaly_threshold_patch_ps32.txt /app/autoencoder_outputs/anomaly_threshold_patch_ps32.txt
+fi
 
 # Permissions for volume
 chmod -R 755 /data
 
 # Start the app
-exec gunicorn -w 1 -t 300 -b 0.0.0.0:8080 flask_app:app
+exec gunicorn -w 1 -t 600 -b 0.0.0.0:8080 flask_app:app

@@ -39,6 +39,8 @@ THRESH_PATCH_PATH_8 = os.path.join(OUTPUT_DIR, "anomaly_threshold_patch_ps8.txt"
 THRESH_PATCH_PATH_32 = os.path.join(OUTPUT_DIR, "anomaly_threshold_patch_ps32.txt")
 PATCH_THRESHOLD_DEFAULT = 0.02
 RUNTIME_DIR = os.path.join(PROJECT_ROOT, "runtime")
+CV_GATE_ENABLED = (os.getenv("CV_GATE_ENABLED", "true").lower() == "true")
+LLM_GATE_ENABLED = (os.getenv("LLM_GATE_ENABLED", "true").lower() == "true")
 
 
 # -------------------------- HELPERS --------------------------
@@ -407,36 +409,37 @@ def verify():
         triggered = False
         method = "AE"
         # LLM gate
-        try:
-            _ = _get_openrouter_api_key()
-            data_url = pil_to_data_url(pil_img, format="JPEG")
-            g_status, g_conf, g_details = llm_inspect_image(data_url)
-            gate_results.append({"source": "LLM", "status": g_status, "confidence": g_conf, "details": g_details})
-            if g_status == "suspicious" and g_conf >= 0.6:
-                triggered = True
-                method = "LLM_GATE"
-        except Exception:
-            pass
-        # CV gate (paper/occlusion heuristic)
-        try:
-            arr = np.asarray(pil_img)
-            h, w = arr.shape[:2]
-            x1, x2 = int(0.2 * w), int(0.8 * w)
-            y1, y2 = int(0.25 * h), int(0.75 * h)
-            roi = arr[y1:y2, x1:x2]
-            hsv = cv2.cvtColor(roi, cv2.COLOR_RGB2HSV)
-            white_mask = (hsv[...,1] < 40) & (hsv[...,2] > 200)
-            white_ratio = float(np.mean(white_mask))
-            edges = cv2.Canny(cv2.cvtColor(roi, cv2.COLOR_RGB2GRAY), 100, 200)
-            edge_ratio = float(np.mean(edges > 0))
-            cv_suspicious = (white_ratio > 0.35) or (edge_ratio < 0.01)
-            cv_conf = float(min(1.0, max(white_ratio * 2.0, (0.02 - edge_ratio) * 50.0))) if cv_suspicious else float(max(0.0, 0.3 - white_ratio))
-            gate_results.append({"source": "CV", "status": "suspicious" if cv_suspicious else "normal", "confidence": cv_conf, "details": {"white_ratio": white_ratio, "edge_ratio": edge_ratio}})
-            if cv_suspicious and cv_conf >= 0.6 and not triggered:
-                triggered = True
-                method = "CV_GATE"
-        except Exception:
-            pass
+        if LLM_GATE_ENABLED:
+            try:
+                _ = _get_openrouter_api_key()
+                data_url = pil_to_data_url(pil_img, format="JPEG")
+                g_status, g_conf, g_details = llm_inspect_image(data_url)
+                gate_results.append({"source": "LLM", "status": g_status, "confidence": g_conf, "details": g_details})
+                if g_status == "suspicious" and g_conf >= 0.6:
+                    triggered = True
+                    method = "LLM_GATE"
+            except Exception:
+                pass
+        if CV_GATE_ENABLED:
+            try:
+                arr = np.asarray(pil_img)
+                h, w = arr.shape[:2]
+                x1, x2 = int(0.2 * w), int(0.8 * w)
+                y1, y2 = int(0.25 * h), int(0.75 * h)
+                roi = arr[y1:y2, x1:x2]
+                hsv = cv2.cvtColor(roi, cv2.COLOR_RGB2HSV)
+                white_mask = (hsv[...,1] < 40) & (hsv[...,2] > 200)
+                white_ratio = float(np.mean(white_mask))
+                edges = cv2.Canny(cv2.cvtColor(roi, cv2.COLOR_RGB2GRAY), 100, 200)
+                edge_ratio = float(np.mean(edges > 0))
+                cv_suspicious = (white_ratio > 0.35) or (edge_ratio < 0.01)
+                cv_conf = float(min(1.0, max(white_ratio * 2.0, (0.02 - edge_ratio) * 50.0))) if cv_suspicious else float(max(0.0, 0.3 - white_ratio))
+                gate_results.append({"source": "CV", "status": "suspicious" if cv_suspicious else "normal", "confidence": cv_conf, "details": {"white_ratio": white_ratio, "edge_ratio": edge_ratio}})
+                if cv_suspicious and cv_conf >= 0.6 and not triggered:
+                    triggered = True
+                    method = "CV_GATE"
+            except Exception:
+                pass
 
         if triggered:
             return jsonify({

@@ -16,8 +16,8 @@ RUN python -m pip install --upgrade pip
 RUN pip install -r requirements.txt
 
 # Only copy needed app files; destination must be a directory
-COPY flask_app.py train_autoencoder.py docker-entrypoint.sh ./
-
+COPY flask_app.py train_autoencoder.py docker-entrypoint.sh autoencoder_genuine.keras   ./
+COPY autoencoder_outputs/ ./autoencoder_outputs/
 RUN chmod +x /app/docker-entrypoint.sh
 
 EXPOSE 8080

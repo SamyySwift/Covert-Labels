@@ -33,7 +33,6 @@ coverage.xml
 images/*
 dataset/
 *.npy
-*.keras
 uploads/
 authentic_labels/
 clg_output_images/
@@ -46,6 +45,7 @@ __pycache__/
 !flask_app.py
 !Dockerfile
 !fly.toml
-!batch_classifier_model.keras
 !batch_label_map.json
 !batch_metadata_map.json
+!batch_classifier_model.keras
+!autoencoder_genuine.keras

@@ -25,7 +25,7 @@ CHANNELS = 3
 AUG_SAVE_SIZE = 512
 RECON_DISPLAY_SCALE = 4
 BACKGROUND_DIR = os.getenv("BACKGROUND_DIR") or "BACKGROUND_DIR"
-ENABLE_BG_RANDOMIZATION = True
+ENABLE_BG_RANDOMIZATION = False
 
 
 def load_and_preprocess(path: tf.Tensor, img_size: int, channels: int = 3) -> tf.Tensor:
@@ -530,14 +530,14 @@ def main():
             writer.writerow([i, l, vl])
     print(f"📈 Saved training history to {hist_path}")
 
-    # Use a more lenient percentile via env (default 95)
-    anomaly_percentile = float(os.getenv("ANOMALY_PERCENTILE", "95"))
+    # Use a more lenient percentile via env (default 98)
+    anomaly_percentile = float(os.getenv("ANOMALY_PERCENTILE", "98"))
     threshold = compute_threshold(autoencoder, val_img_ds, percentile=anomaly_percentile)
-    patch_threshold_16 = compute_threshold_patch(autoencoder, val_img_ds, percentile=95.0, patch_size=16)
-    patch_threshold_8 = compute_threshold_patch(autoencoder, val_img_ds, percentile=95.0, patch_size=8)
-    patch_threshold_32 = compute_threshold_patch(autoencoder, val_img_ds, percentile=95.0, patch_size=32)
+    patch_threshold_16 = compute_threshold_patch(autoencoder, val_img_ds, percentile=98.0, patch_size=16)
+    patch_threshold_8 = compute_threshold_patch(autoencoder, val_img_ds, percentile=98.0, patch_size=8)
+    patch_threshold_32 = compute_threshold_patch(autoencoder, val_img_ds, percentile=98.0, patch_size=32)
 
-   
+
 
 if __name__ == "__main__":
     main()
