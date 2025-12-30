@@ -1,29 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Ensure volume structure
-mkdir -p /data /data/autoencoder_outputs /data/GENUINE_IMAGE_DIR
-mkdir -p /app/autoencoder_outputs
+mkdir -p /data /data/reference_images /data/temp_uploads
+ln -sf /data/reference_images /app/reference_images
+ln -sf /data/temp_uploads /app/temp_uploads
 
-# Link model and thresholds from volume into app paths expected by flask_app.py
-if [ -f /data/autoencoder_genuine.keras ]; then
-  ln -sf /data/autoencoder_genuine.keras /app/autoencoder_genuine.keras
-fi
-if [ -f /data/autoencoder_outputs/anomaly_threshold.txt ]; then
-  ln -sf /data/autoencoder_outputs/anomaly_threshold.txt /app/autoencoder_outputs/anomaly_threshold.txt
-fi
-if [ -f /data/autoencoder_outputs/anomaly_threshold_patch.txt ]; then
-  ln -sf /data/autoencoder_outputs/anomaly_threshold_patch.txt /app/autoencoder_outputs/anomaly_threshold_patch.txt
-fi
-if [ -f /data/autoencoder_outputs/anomaly_threshold_patch_ps8.txt ]; then
-  ln -sf /data/autoencoder_outputs/anomaly_threshold_patch_ps8.txt /app/autoencoder_outputs/anomaly_threshold_patch_ps8.txt
-fi
-if [ -f /data/autoencoder_outputs/anomaly_threshold_patch_ps32.txt ]; then
-  ln -sf /data/autoencoder_outputs/anomaly_threshold_patch_ps32.txt /app/autoencoder_outputs/anomaly_threshold_patch_ps32.txt
-fi
+# Persist SQLite DB on the volume
+touch /data/product_auth.db || true
+ln -sf /data/product_auth.db /app/product_auth.db
 
-# Permissions for volume
 chmod -R 755 /data
 
-# Start the app
-exec gunicorn -w 1 -t 600 -b 0.0.0.0:8080 flask_app:app
+exec gunicorn -w 2 -t 600 -b 0.0.0.0:8080 product_auth:app

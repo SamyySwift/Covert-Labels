@@ -1,0 +1,224 @@
+2025-12-30 07:53:22,549 - __main__ - INFO - Database initialized successfully
+2025-12-30 07:53:22,549 - __main__ - INFO - Product Authentication System started (LLM-only mode)
+2025-12-30 07:53:22,559 - werkzeug - INFO - [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:8080
+ * Running on http://172.20.10.3:8080
+2025-12-30 07:53:22,559 - werkzeug - INFO - [33mPress CTRL+C to quit[0m
+2025-12-30 07:53:43,648 - __main__ - INFO - Processing reference image: temp_1767077623.647089_IMG_4160.jpeg
+2025-12-30 07:53:47,483 - httpx - INFO - HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 200 OK"
+2025-12-30 07:53:47,495 - __main__ - INFO - LLM API call successful for 1 image(s)
+2025-12-30 07:53:47,495 - __main__ - INFO - Extracted product name: Sartor Disinfectant Solution
+2025-12-30 07:53:51,105 - httpx - INFO - HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 200 OK"
+2025-12-30 07:53:51,107 - __main__ - INFO - LLM API call successful for 1 image(s)
+2025-12-30 07:53:51,112 - __main__ - INFO - Saved reference product: Sartor Disinfectant Solution [blue]
+2025-12-30 07:53:51,112 - __main__ - INFO - Successfully saved reference product: Sartor Disinfectant Solution [blue]
+2025-12-30 07:53:51,115 - werkzeug - INFO - 127.0.0.1 - - [30/Dec/2025 07:53:51] "[35m[1mPOST /api/reference/upload HTTP/1.1[0m" 201 -
+2025-12-30 07:54:04,103 - __main__ - INFO - Verifying product image: verify_1767077644.099339_IMG_4160.jpeg
+2025-12-30 07:54:08,442 - httpx - INFO - HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 200 OK"
+2025-12-30 07:54:08,443 - __main__ - INFO - LLM API call successful for 1 image(s)
+2025-12-30 07:54:08,444 - __main__ - INFO - Extracted product name: Sartor Disinfectant Solution
+2025-12-30 07:54:14,450 - httpx - INFO - HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 200 OK"
+2025-12-30 07:54:14,453 - __main__ - INFO - LLM API call successful for 1 image(s)
+2025-12-30 07:54:18,922 - httpx - INFO - HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 200 OK"
+2025-12-30 07:54:20,900 - __main__ - INFO - LLM API call successful for 2 image(s)
+2025-12-30 07:54:20,901 - __main__ - ERROR - LLM comparison failed: list indices must be integers or slices, not str
+2025-12-30 07:54:20,905 - __main__ - INFO - Verification complete: Sartor Disinfectant Solution - COUNTERFEIT
+2025-12-30 07:54:20,907 - werkzeug - INFO - 127.0.0.1 - - [30/Dec/2025 07:54:20] "POST /api/verify HTTP/1.1" 200 -
+2025-12-30 07:55:25,140 - __main__ - INFO - Verifying product image: verify_1767077725.137439_IMG_4160.jpeg
+2025-12-30 07:55:29,406 - httpx - INFO - HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 200 OK"
+2025-12-30 07:55:29,414 - __main__ - INFO - LLM API call successful for 1 image(s)
+2025-12-30 07:55:29,414 - __main__ - INFO - Extracted product name: Sart+r Disinfectant Solution
+2025-12-30 07:55:33,901 - httpx - INFO - HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 200 OK"
+2025-12-30 07:55:33,903 - __main__ - INFO - LLM API call successful for 1 image(s)
+2025-12-30 07:55:33,909 - werkzeug - INFO - 127.0.0.1 - - [30/Dec/2025 07:55:33] "[33mPOST /api/verify HTTP/1.1[0m" 404 -
+2025-12-30 08:40:17,143 - __main__ - INFO - Database initialized successfully
+2025-12-30 08:40:17,143 - __main__ - INFO - Product Authentication System started (LLM-only mode)
+2025-12-30 08:40:17,158 - werkzeug - INFO - [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:8080
+ * Running on http://172.20.10.3:8080
+2025-12-30 08:40:17,158 - werkzeug - INFO - [33mPress CTRL+C to quit[0m
+2025-12-30 08:40:26,729 - __main__ - INFO - Processing reference image: temp_1767080426.724504_IMG_4160.jpeg
+2025-12-30 08:40:33,172 - httpx - INFO - HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 200 OK"
+2025-12-30 08:40:33,198 - __main__ - INFO - LLM API call successful for 1 image(s)
+2025-12-30 08:40:33,198 - __main__ - INFO - Extracted product name: Sartor Disinfectant Solution
+2025-12-30 08:40:37,064 - httpx - INFO - HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 200 OK"
+2025-12-30 08:40:37,067 - __main__ - INFO - LLM API call successful for 1 image(s)
+2025-12-30 08:40:37,073 - __main__ - INFO - Updated reference product: Sartor Disinfectant Solution [blue]
+2025-12-30 08:40:37,074 - __main__ - INFO - Successfully saved reference product: Sartor Disinfectant Solution [blue]
+2025-12-30 08:40:37,077 - werkzeug - INFO - 127.0.0.1 - - [30/Dec/2025 08:40:37] "[35m[1mPOST /api/reference/upload HTTP/1.1[0m" 201 -
+2025-12-30 08:40:47,904 - __main__ - INFO - Verifying product image: verify_1767080447.900545_IMG_4160.jpeg
+2025-12-30 08:40:52,013 - httpx - INFO - HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 200 OK"
+2025-12-30 08:40:52,016 - __main__ - INFO - LLM API call successful for 1 image(s)
+2025-12-30 08:40:52,016 - __main__ - INFO - Extracted product name: Sartor Disinfectant Solution
+2025-12-30 08:40:55,497 - httpx - INFO - HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 200 OK"
+2025-12-30 08:40:55,499 - __main__ - INFO - LLM API call successful for 1 image(s)
+2025-12-30 08:41:01,607 - httpx - INFO - HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 200 OK"
+2025-12-30 08:41:01,609 - __main__ - INFO - LLM API call successful for 2 image(s)
+2025-12-30 08:41:01,614 - __main__ - INFO - Verification complete: Sartor Disinfectant Solution - AUTHENTIC
+2025-12-30 08:41:01,616 - werkzeug - INFO - 127.0.0.1 - - [30/Dec/2025 08:41:01] "POST /api/verify HTTP/1.1" 200 -
+2025-12-30 08:41:23,984 - __main__ - INFO - Verifying product image: verify_1767080483.978523_Generated_Image_December_03_2025_-_9_06AM.png
+2025-12-30 08:41:28,464 - httpx - INFO - HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 200 OK"
+2025-12-30 08:41:28,466 - __main__ - INFO - LLM API call successful for 1 image(s)
+2025-12-30 08:41:28,467 - __main__ - INFO - Extracted product name: Sartor Disinfectant Solution
+2025-12-30 08:41:33,576 - httpx - INFO - HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 200 OK"
+2025-12-30 08:41:33,582 - __main__ - INFO - LLM API call successful for 1 image(s)
+2025-12-30 08:41:38,760 - httpx - INFO - HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 200 OK"
+2025-12-30 08:41:40,972 - __main__ - INFO - LLM API call successful for 2 image(s)
+2025-12-30 08:41:40,978 - __main__ - INFO - Verification complete: Sartor Disinfectant Solution - COUNTERFEIT
+2025-12-30 08:41:40,982 - werkzeug - INFO - 127.0.0.1 - - [30/Dec/2025 08:41:40] "POST /api/verify HTTP/1.1" 200 -
+2025-12-30 08:43:04,687 - __main__ - INFO - Processing reference image: temp_1767080584.685814_IMG_4178.jpeg
+2025-12-30 08:43:09,932 - httpx - INFO - HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 200 OK"
+2025-12-30 08:43:09,945 - __main__ - INFO - LLM API call successful for 1 image(s)
+2025-12-30 08:43:09,946 - __main__ - INFO - Extracted product name: Sartor Instant Hand Sanitizer
+2025-12-30 08:43:17,121 - httpx - INFO - HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 200 OK"
+2025-12-30 08:43:17,124 - __main__ - INFO - LLM API call successful for 1 image(s)
+2025-12-30 08:43:17,131 - __main__ - INFO - Saved reference product: Sartor Instant Hand Sanitizer [blue]
+2025-12-30 08:43:17,131 - __main__ - INFO - Successfully saved reference product: Sartor Instant Hand Sanitizer [blue]
+2025-12-30 08:43:17,132 - werkzeug - INFO - 127.0.0.1 - - [30/Dec/2025 08:43:17] "[35m[1mPOST /api/reference/upload HTTP/1.1[0m" 201 -
+2025-12-30 08:45:20,697 - __main__ - INFO - Processing reference image: temp_1767080720.69489_IMG_4204.jpeg
+2025-12-30 08:45:26,141 - httpx - INFO - HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 200 OK"
+2025-12-30 08:45:26,144 - __main__ - INFO - LLM API call successful for 1 image(s)
+2025-12-30 08:45:26,144 - __main__ - INFO - Extracted product name: Sarter Instant Hand Sanitizer
+2025-12-30 08:45:30,602 - httpx - INFO - HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 200 OK"
+2025-12-30 08:45:30,605 - __main__ - INFO - LLM API call successful for 1 image(s)
+2025-12-30 08:45:30,611 - __main__ - INFO - Saved reference product: Sarter Instant Hand Sanitizer [pink]
+2025-12-30 08:45:30,611 - __main__ - INFO - Successfully saved reference product: Sarter Instant Hand Sanitizer [pink]
+2025-12-30 08:45:30,614 - werkzeug - INFO - 127.0.0.1 - - [30/Dec/2025 08:45:30] "[35m[1mPOST /api/reference/upload HTTP/1.1[0m" 201 -
+2025-12-30 08:46:48,369 - __main__ - INFO - Processing reference image: temp_1767080808.366623_IMG_4220.jpeg
+2025-12-30 08:46:52,658 - httpx - INFO - HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 200 OK"
+2025-12-30 08:46:52,662 - __main__ - INFO - LLM API call successful for 1 image(s)
+2025-12-30 08:46:52,663 - __main__ - INFO - Extracted product name: Sartor Instant Hand Sanitizer
+2025-12-30 08:46:58,763 - httpx - INFO - HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 200 OK"
+2025-12-30 08:46:58,776 - __main__ - INFO - LLM API call successful for 1 image(s)
+2025-12-30 08:46:58,779 - __main__ - INFO - Saved reference product: Sartor Instant Hand Sanitizer [clear]
+2025-12-30 08:46:58,779 - __main__ - INFO - Successfully saved reference product: Sartor Instant Hand Sanitizer [clear]
+2025-12-30 08:46:58,781 - werkzeug - INFO - 127.0.0.1 - - [30/Dec/2025 08:46:58] "[35m[1mPOST /api/reference/upload HTTP/1.1[0m" 201 -
+2025-12-30 08:50:03,166 - __main__ - INFO - Processing reference image: temp_1767081003.163332_IMG_4500.jpeg
+2025-12-30 08:50:07,535 - httpx - INFO - HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 200 OK"
+2025-12-30 08:50:07,543 - __main__ - INFO - LLM API call successful for 1 image(s)
+2025-12-30 08:50:07,543 - __main__ - INFO - Extracted product name: Sartor Disinfectant Solution
+2025-12-30 08:50:12,142 - httpx - INFO - HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 200 OK"
+2025-12-30 08:50:12,145 - __main__ - INFO - LLM API call successful for 1 image(s)
+2025-12-30 08:50:12,152 - __main__ - INFO - Updated reference product: Sartor Disinfectant Solution [blue]
+2025-12-30 08:50:12,152 - __main__ - INFO - Successfully saved reference product: Sartor Disinfectant Solution [blue]
+2025-12-30 08:50:12,154 - werkzeug - INFO - 127.0.0.1 - - [30/Dec/2025 08:50:12] "[35m[1mPOST /api/reference/upload HTTP/1.1[0m" 201 -
+2025-12-30 08:51:07,869 - __main__ - INFO - Verifying product image: verify_1767081067.864864_IMG_4206.jpeg
+2025-12-30 08:51:12,184 - httpx - INFO - HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 200 OK"
+2025-12-30 08:51:12,192 - __main__ - INFO - LLM API call successful for 1 image(s)
+2025-12-30 08:51:12,192 - __main__ - INFO - Extracted product name: Sartor Instant Hand Sanitizer
+2025-12-30 08:51:16,040 - httpx - INFO - HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 200 OK"
+2025-12-30 08:51:16,041 - __main__ - INFO - LLM API call successful for 1 image(s)
+2025-12-30 08:51:16,051 - werkzeug - INFO - 127.0.0.1 - - [30/Dec/2025 08:51:16] "[33mPOST /api/verify HTTP/1.1[0m" 404 -
+2025-12-30 08:57:53,948 - __main__ - INFO - Processing reference image: temp_1767081473.945295_IMG_4206.jpeg
+2025-12-30 08:57:58,023 - httpx - INFO - HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 200 OK"
+2025-12-30 08:57:58,040 - __main__ - INFO - LLM API call successful for 1 image(s)
+2025-12-30 08:57:58,040 - __main__ - INFO - Extracted product name: Sartor Instant Hand Sanitizer
+2025-12-30 08:58:02,873 - httpx - INFO - HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 200 OK"
+2025-12-30 08:58:02,889 - __main__ - INFO - LLM API call successful for 1 image(s)
+2025-12-30 08:58:02,904 - __main__ - INFO - Saved reference product: Sartor Instant Hand Sanitizer [pink]
+2025-12-30 08:58:02,905 - __main__ - INFO - Successfully saved reference product: Sartor Instant Hand Sanitizer [pink]
+2025-12-30 08:58:02,906 - werkzeug - INFO - 127.0.0.1 - - [30/Dec/2025 08:58:02] "[35m[1mPOST /api/reference/upload HTTP/1.1[0m" 201 -
+2025-12-30 08:58:14,774 - __main__ - INFO - Verifying product image: verify_1767081494.769979_IMG_4206.jpeg
+2025-12-30 08:58:18,460 - httpx - INFO - HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 200 OK"
+2025-12-30 08:58:18,467 - __main__ - INFO - LLM API call successful for 1 image(s)
+2025-12-30 08:58:18,467 - __main__ - INFO - Extracted product name: Sartor Instant Hand Sanitizer
+2025-12-30 08:58:22,436 - httpx - INFO - HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 200 OK"
+2025-12-30 08:58:22,439 - __main__ - INFO - LLM API call successful for 1 image(s)
+2025-12-30 08:58:28,594 - httpx - INFO - HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 200 OK"
+2025-12-30 08:58:28,600 - __main__ - INFO - LLM API call successful for 2 image(s)
+2025-12-30 08:58:28,605 - __main__ - INFO - Verification complete: Sartor Instant Hand Sanitizer - AUTHENTIC
+2025-12-30 08:58:28,607 - werkzeug - INFO - 127.0.0.1 - - [30/Dec/2025 08:58:28] "POST /api/verify HTTP/1.1" 200 -
+2025-12-30 10:05:47,019 - __main__ - INFO - Database initialized successfully
+2025-12-30 10:05:47,020 - __main__ - INFO - Product Authentication System started (LLM-only mode)
+2025-12-30 10:05:47,034 - werkzeug - INFO - [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:8080
+ * Running on http://172.20.10.3:8080
+2025-12-30 10:05:47,034 - werkzeug - INFO - [33mPress CTRL+C to quit[0m
+2025-12-30 10:06:16,677 - __main__ - INFO - Verifying product image: verify_1767085576.675367_Generated_Image_December_03_2025_-_9_18AM.png
+2025-12-30 10:06:22,284 - httpx - INFO - HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 200 OK"
+2025-12-30 10:06:22,300 - __main__ - INFO - LLM API call successful for 1 image(s)
+2025-12-30 10:06:22,301 - __main__ - INFO - Extracted product name: Sartor Disinfectant Solution
+2025-12-30 10:06:26,538 - httpx - INFO - HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 200 OK"
+2025-12-30 10:06:26,542 - __main__ - INFO - LLM API call successful for 1 image(s)
+2025-12-30 10:06:32,008 - httpx - INFO - HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 200 OK"
+2025-12-30 10:06:33,899 - __main__ - INFO - LLM API call successful for 2 image(s)
+2025-12-30 10:06:33,900 - __main__ - ERROR - LLM comparison failed: list indices must be integers or slices, not str
+2025-12-30 10:06:33,904 - __main__ - INFO - Verification complete: Sartor Disinfectant Solution - COUNTERFEIT
+2025-12-30 10:06:33,907 - werkzeug - INFO - 127.0.0.1 - - [30/Dec/2025 10:06:33] "POST /api/verify HTTP/1.1" 200 -
+2025-12-30 10:07:56,091 - __main__ - INFO - Verifying product image: verify_1767085676.082424_Generated_Image_December_03_2025_-_9_18AM.png
+2025-12-30 10:08:01,303 - httpx - INFO - HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 200 OK"
+2025-12-30 10:08:01,311 - __main__ - INFO - LLM API call successful for 1 image(s)
+2025-12-30 10:08:01,311 - __main__ - INFO - Extracted product name: Sartor Disinfectant Solution
+2025-12-30 10:08:05,348 - httpx - INFO - HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 200 OK"
+2025-12-30 10:08:05,351 - __main__ - INFO - LLM API call successful for 1 image(s)
+2025-12-30 10:08:11,545 - httpx - INFO - HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 200 OK"
+2025-12-30 10:08:13,696 - __main__ - INFO - LLM API call successful for 2 image(s)
+2025-12-30 10:08:13,702 - __main__ - INFO - Verification complete: Sartor Disinfectant Solution - COUNTERFEIT
+2025-12-30 10:08:13,704 - werkzeug - INFO - 127.0.0.1 - - [30/Dec/2025 10:08:13] "POST /api/verify HTTP/1.1" 200 -
+2025-12-30 10:17:17,601 - __main__ - INFO - Database initialized successfully
+2025-12-30 10:17:17,602 - __main__ - INFO - Product Authentication System started (LLM-only mode)
+2025-12-30 10:17:17,615 - werkzeug - INFO - [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:8080
+ * Running on http://172.20.10.3:8080
+2025-12-30 10:17:17,615 - werkzeug - INFO - [33mPress CTRL+C to quit[0m
+2025-12-30 11:40:46,162 - __main__ - INFO - Database initialized successfully
+2025-12-30 11:40:46,164 - __main__ - INFO - Database initialized successfully
+2025-12-30 11:40:46,164 - __main__ - INFO - Product Authentication System started (LLM-only mode)
+2025-12-30 11:40:46,185 - werkzeug - INFO - [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:8080
+ * Running on http://172.20.10.3:8080
+2025-12-30 11:40:46,185 - werkzeug - INFO - [33mPress CTRL+C to quit[0m
+2025-12-30 11:40:56,410 - __main__ - INFO - Database initialized successfully
+2025-12-30 11:40:56,412 - __main__ - INFO - Database initialized successfully
+2025-12-30 11:40:56,412 - __main__ - INFO - Product Authentication System started (LLM-only mode)
+2025-12-30 11:40:56,423 - werkzeug - INFO - [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:8080
+ * Running on http://172.20.10.3:8080
+2025-12-30 11:40:56,424 - werkzeug - INFO - [33mPress CTRL+C to quit[0m
+2025-12-30 11:43:20,557 - __main__ - INFO - Database initialized successfully
+2025-12-30 11:43:20,558 - __main__ - INFO - Database initialized successfully
+2025-12-30 11:43:20,558 - __main__ - INFO - Product Authentication System started (LLM-only mode)
+2025-12-30 11:43:20,569 - werkzeug - INFO - [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:8080
+ * Running on http://172.20.10.3:8080
+2025-12-30 11:43:20,569 - werkzeug - INFO - [33mPress CTRL+C to quit[0m
+2025-12-30 11:44:20,066 - __main__ - INFO - Processing reference image: temp_1767091460.063922_IMG_4160.jpeg
+2025-12-30 11:44:24,169 - httpx - INFO - HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 200 OK"
+2025-12-30 11:44:24,186 - __main__ - INFO - LLM API call successful for 1 image(s)
+2025-12-30 11:44:24,186 - __main__ - INFO - Extracted product name: Sartor Disinfectant Solution
+2025-12-30 11:44:27,977 - httpx - INFO - HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 200 OK"
+2025-12-30 11:44:27,979 - __main__ - INFO - LLM API call successful for 1 image(s)
+2025-12-30 11:44:32,405 - httpx - INFO - HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 200 OK"
+2025-12-30 11:44:32,427 - __main__ - INFO - LLM API call successful for 1 image(s)
+2025-12-30 11:44:32,436 - __main__ - INFO - Saved reference product: Sartor Disinfectant Solution [blue_500ml]
+2025-12-30 11:44:32,436 - __main__ - INFO - Successfully saved reference product: Sartor Disinfectant Solution [blue_500ml]
+2025-12-30 11:44:32,437 - werkzeug - INFO - 127.0.0.1 - - [30/Dec/2025 11:44:32] "[35m[1mPOST /api/reference/upload HTTP/1.1[0m" 201 -
+2025-12-30 11:45:05,121 - __main__ - INFO - Processing reference image: temp_1767091505.118068_IMG_4270.jpeg
+2025-12-30 11:45:09,416 - httpx - INFO - HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 200 OK"
+2025-12-30 11:45:09,423 - __main__ - INFO - LLM API call successful for 1 image(s)
+2025-12-30 11:45:09,425 - __main__ - INFO - Extracted product name: Sartor Disinfectant Solution
+2025-12-30 11:45:14,735 - httpx - INFO - HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 200 OK"
+2025-12-30 11:45:14,750 - __main__ - INFO - LLM API call successful for 1 image(s)
+2025-12-30 11:45:18,916 - httpx - INFO - HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 200 OK"
+2025-12-30 11:45:18,919 - __main__ - INFO - LLM API call successful for 1 image(s)
+2025-12-30 11:45:18,931 - __main__ - INFO - Saved reference product: Sartor Disinfectant Solution [default_70ml]
+2025-12-30 11:45:18,931 - __main__ - INFO - Successfully saved reference product: Sartor Disinfectant Solution [default_70ml]
+2025-12-30 11:45:18,933 - werkzeug - INFO - 127.0.0.1 - - [30/Dec/2025 11:45:18] "[35m[1mPOST /api/reference/upload HTTP/1.1[0m" 201 -
+2025-12-30 11:49:58,543 - __main__ - INFO - Processing reference image: temp_1767091798.539563_IMG_4264.jpeg
+2025-12-30 11:50:03,696 - httpx - INFO - HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 200 OK"
+2025-12-30 11:50:03,708 - __main__ - INFO - LLM API call successful for 1 image(s)
+2025-12-30 11:50:03,709 - __main__ - INFO - Extracted product name: Sartor Disinfectant Solution
+2025-12-30 11:50:07,706 - httpx - INFO - HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 200 OK"
+2025-12-30 11:50:07,716 - __main__ - INFO - LLM API call successful for 1 image(s)
+2025-12-30 11:50:12,010 - httpx - INFO - HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 200 OK"
+2025-12-30 11:50:12,021 - __main__ - INFO - LLM API call successful for 1 image(s)
+2025-12-30 11:50:12,032 - __main__ - INFO - Saved reference product: Sartor Disinfectant Solution [blue_70ml]
+2025-12-30 11:50:12,032 - __main__ - INFO - Successfully saved reference product: Sartor Disinfectant Solution [blue_70ml]
+2025-12-30 11:50:12,034 - werkzeug - INFO - 127.0.0.1 - - [30/Dec/2025 11:50:12] "[35m[1mPOST /api/reference/upload HTTP/1.1[0m" 201 -

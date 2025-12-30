@@ -19,13 +19,15 @@ RUNTIME_DIR = os.path.join(os.getcwd(), "runtime")
 IMG_SIZE = 224
 BATCH_SIZE = 8
 VAL_SPLIT = 0.2
-EPOCHS = 30
+EPOCHS = 50
 LIMIT = None
 CHANNELS = 3
 AUG_SAVE_SIZE = 512
 RECON_DISPLAY_SCALE = 4
 BACKGROUND_DIR = os.getenv("BACKGROUND_DIR") or "BACKGROUND_DIR"
 ENABLE_BG_RANDOMIZATION = False
+LEARNING_RATE = 0.0001
+DROPOUT_RATE = 0.15
 
 
 def load_and_preprocess(path: tf.Tensor, img_size: int, channels: int = 3) -> tf.Tensor:
@@ -100,6 +102,18 @@ def save_reconstructions(model, val_img_ds, out_dir, n=8, img_size=IMG_SIZE, fal
     return out_path
 
 
+class SpatialAttention(tf.keras.layers.Layer):
+    def __init__(self, **kwargs):
+        super(SpatialAttention, self).__init__(**kwargs)
+        self.conv = tf.keras.layers.Conv2D(1, 7, padding="same", activation="sigmoid")
+    
+    def call(self, x):
+        avg_pool = tf.reduce_mean(x, axis=-1, keepdims=True)
+        max_pool = tf.reduce_max(x, axis=-1, keepdims=True)
+        concat = tf.concat([avg_pool, max_pool], axis=-1)
+        attention = self.conv(concat)
+        return x * attention
+
 class AnomalyDetector(tf.keras.Model):
     def __init__(self, img_size: int = IMG_SIZE, channels: int = CHANNELS, latent_channels: int = 256, **kwargs):
         super(AnomalyDetector, self).__init__(**kwargs)
@@ -107,34 +121,46 @@ class AnomalyDetector(tf.keras.Model):
         self.channels = channels
         self.latent_channels = latent_channels
         L = tf.keras.layers
-        self.conv1a = L.Conv2D(64, 3, strides=1, padding="same", use_bias=False)
+        
+        self.conv1a = L.Conv2D(64, 3, strides=1, padding="same", use_bias=False, kernel_regularizer=tf.keras.regularizers.l2(1e-4))
         self.bn1a = L.BatchNormalization()
         self.act1a = L.ReLU()
-        self.conv1b = L.Conv2D(64, 3, strides=2, padding="same", use_bias=False)
+        self.conv1b = L.Conv2D(64, 3, strides=2, padding="same", use_bias=False, kernel_regularizer=tf.keras.regularizers.l2(1e-4))
         self.bn1b = L.BatchNormalization()
         self.act1b = L.ReLU()
-        self.conv2a = L.Conv2D(128, 3, strides=1, padding="same", use_bias=False)
+        self.drop1 = L.Dropout(DROPOUT_RATE)
+        
+        self.conv2a = L.Conv2D(128, 3, strides=1, padding="same", use_bias=False, kernel_regularizer=tf.keras.regularizers.l2(1e-4))
         self.bn2a = L.BatchNormalization()
         self.act2a = L.ReLU()
-        self.conv2b = L.Conv2D(128, 3, strides=2, padding="same", use_bias=False)
+        self.conv2b = L.Conv2D(128, 3, strides=2, padding="same", use_bias=False, kernel_regularizer=tf.keras.regularizers.l2(1e-4))
         self.bn2b = L.BatchNormalization()
         self.act2b = L.ReLU()
-        self.conv3a = L.Conv2D(256, 3, strides=1, padding="same", use_bias=False)
+        self.drop2 = L.Dropout(DROPOUT_RATE)
+        
+        self.conv3a = L.Conv2D(256, 3, strides=1, padding="same", use_bias=False, kernel_regularizer=tf.keras.regularizers.l2(1e-4))
         self.bn3a = L.BatchNormalization()
         self.act3a = L.ReLU()
-        self.conv3b = L.Conv2D(latent_channels, 3, strides=2, padding="same", use_bias=False)
+        self.conv3b = L.Conv2D(latent_channels, 3, strides=2, padding="same", use_bias=False, kernel_regularizer=tf.keras.regularizers.l2(1e-4))
         self.bn3b = L.BatchNormalization()
         self.act3b = L.ReLU()
+        self.drop3 = L.Dropout(DROPOUT_RATE)
+        
+        self.attention = SpatialAttention()
         self.up1 = L.Conv2DTranspose(256, 3, strides=2, padding="same", use_bias=False)
         self.bn_up1 = L.BatchNormalization()
         self.act_up1 = L.ReLU()
         self.merge1 = L.Concatenate()
         self.conv_up1b = L.Conv2D(256, 3, strides=1, padding="same", activation="relu")
+        self.drop_up1 = L.Dropout(DROPOUT_RATE * 0.5)
+        
         self.up2 = L.Conv2DTranspose(128, 3, strides=2, padding="same", use_bias=False)
         self.bn_up2 = L.BatchNormalization()
         self.act_up2 = L.ReLU()
         self.merge2 = L.Concatenate()
         self.conv_up2b = L.Conv2D(128, 3, strides=1, padding="same", activation="relu")
+        self.drop_up2 = L.Dropout(DROPOUT_RATE * 0.5)
+        
         self.up3 = L.Conv2DTranspose(64, 3, strides=2, padding="same", use_bias=False)
         self.bn_up3 = L.BatchNormalization()
         self.act_up3 = L.ReLU()
@@ -142,20 +168,31 @@ class AnomalyDetector(tf.keras.Model):
         self.conv_up3b = L.Conv2D(64, 3, strides=1, padding="same", activation="relu")
         self.out_conv = L.Conv2D(channels, 3, padding="same", activation="sigmoid")
 
-    def call(self, x):
-        c1 = self.act1a(self.bn1a(self.conv1a(x)))
-        d1 = self.act1b(self.bn1b(self.conv1b(c1)))
-        c2 = self.act2a(self.bn2a(self.conv2a(d1)))
-        d2 = self.act2b(self.bn2b(self.conv2b(c2)))
-        c3 = self.act3a(self.bn3a(self.conv3a(d2)))
-        z = self.act3b(self.bn3b(self.conv3b(c3)))
-        u1 = self.act_up1(self.bn_up1(self.up1(z)))
+    def call(self, x, training=None):
+        c1 = self.act1a(self.bn1a(self.conv1a(x), training=training))
+        d1 = self.act1b(self.bn1b(self.conv1b(c1), training=training))
+        d1 = self.drop1(d1, training=training)
+        
+        c2 = self.act2a(self.bn2a(self.conv2a(d1), training=training))
+        d2 = self.act2b(self.bn2b(self.conv2b(c2), training=training))
+        d2 = self.drop2(d2, training=training)
+        
+        c3 = self.act3a(self.bn3a(self.conv3a(d2), training=training))
+        z = self.act3b(self.bn3b(self.conv3b(c3), training=training))
+        z = self.drop3(z, training=training)
+        z = self.attention(z)
+        
+        u1 = self.act_up1(self.bn_up1(self.up1(z), training=training))
         u1 = self.merge1([u1, c3])
         u1 = self.conv_up1b(u1)
-        u2 = self.act_up2(self.bn_up2(self.up2(u1)))
+        u1 = self.drop_up1(u1, training=training)
+        
+        u2 = self.act_up2(self.bn_up2(self.up2(u1), training=training))
         u2 = self.merge2([u2, c2])
         u2 = self.conv_up2b(u2)
-        u3 = self.act_up3(self.bn_up3(self.up3(u2)))
+        u2 = self.drop_up2(u2, training=training)
+        
+        u3 = self.act_up3(self.bn_up3(self.up3(u2), training=training))
         u3 = self.merge3([u3, c1])
         u3 = self.conv_up3b(u3)
         y = self.out_conv(u3)
@@ -187,10 +224,37 @@ def patch_max_mse(x_true: tf.Tensor, x_pred: tf.Tensor, patch_size: int = 16) ->
     pooled = tf.nn.avg_pool(m, ksize=[1, patch_size, patch_size, 1], strides=[1, patch_size, patch_size, 1], padding="SAME")
     return tf.reduce_max(pooled, axis=(1, 2))
 
+perceptual_model = None
+
+def build_perceptual_model():
+    vgg = tf.keras.applications.VGG16(include_top=False, weights='imagenet', input_shape=(IMG_SIZE, IMG_SIZE, 3))
+    vgg.trainable = False
+    layer_names = ['block1_conv2', 'block2_conv2', 'block3_conv3']
+    outputs = [vgg.get_layer(name).output for name in layer_names]
+    return tf.keras.Model(inputs=vgg.input, outputs=outputs)
+
+def perceptual_loss(y_true: tf.Tensor, y_pred: tf.Tensor) -> tf.Tensor:
+    global perceptual_model
+    if perceptual_model is None:
+        perceptual_model = build_perceptual_model()
+    
+    true_features = perceptual_model(y_true)
+    pred_features = perceptual_model(y_pred)
+    
+    loss = 0.0
+    for true_feat, pred_feat in zip(true_features, pred_features):
+        loss += tf.reduce_mean(tf.abs(true_feat - pred_feat))
+    return loss / len(true_features)
+
 def mixed_loss(y_true: tf.Tensor, y_pred: tf.Tensor) -> tf.Tensor:
     mse = tf.reduce_mean(tf.math.squared_difference(y_true, y_pred), axis=(1, 2, 3))
-    ssim = tf.image.ssim(y_true, y_pred, max_val=1.0)
-    return tf.reduce_mean(0.5 * mse + 0.5 * (1.0 - ssim))
+    ssim_val = tf.image.ssim(y_true, y_pred, max_val=1.0)
+    ssim_loss = 1.0 - ssim_val
+    
+    perc_loss = perceptual_loss(y_true, y_pred)
+    
+    total_loss = 0.3 * mse + 0.4 * ssim_loss + 0.3 * perc_loss
+    return tf.reduce_mean(total_loss)
 
 def compute_threshold(autoencoder: tf.keras.Model, val_img_ds: tf.data.Dataset, percentile: float = 95.0) -> float:
     losses = []
@@ -227,6 +291,27 @@ def compute_threshold_patch(autoencoder: tf.keras.Model, val_img_ds: tf.data.Dat
 
 
 # NEW: sensitive detector that also checks localized anomalies
+def multi_scale_anomaly_score(x_true: tf.Tensor, x_pred: tf.Tensor) -> dict:
+    global_mse = float(reconstruction_mse(x_true, x_pred)[0].numpy())
+    
+    patch_8 = float(patch_max_mse(x_true, x_pred, patch_size=8)[0].numpy())
+    patch_16 = float(patch_max_mse(x_true, x_pred, patch_size=16)[0].numpy())
+    patch_32 = float(patch_max_mse(x_true, x_pred, patch_size=32)[0].numpy())
+    
+    ssim_val = float(tf.image.ssim(x_true, x_pred, max_val=1.0)[0].numpy())
+    
+    mse_map_val = mse_map(x_true, x_pred)[0].numpy()
+    spatial_variance = float(np.std(mse_map_val))
+    
+    return {
+        'global_mse': global_mse,
+        'patch_8': patch_8,
+        'patch_16': patch_16,
+        'patch_32': patch_32,
+        'ssim': ssim_val,
+        'spatial_variance': spatial_variance
+    }
+
 def detect_image_anomaly_sensitive(autoencoder: tf.keras.Model, image_path: str, global_threshold: float, patch_threshold: float, patch_size: int = 16):
     img_bytes = tf.io.read_file(image_path)
     img = tf.image.decode_image(img_bytes, channels=CHANNELS, expand_animations=False)
@@ -234,9 +319,17 @@ def detect_image_anomaly_sensitive(autoencoder: tf.keras.Model, image_path: str,
     img = tf.image.resize(img, [IMG_SIZE, IMG_SIZE])
     x_img = tf.expand_dims(img, axis=0)
     pred = autoencoder.predict(x_img, verbose=0)
-    global_loss = float(reconstruction_mse(x_img, pred)[0].numpy())
-    local_max = float(patch_max_mse(x_img, pred, patch_size=patch_size)[0].numpy())
-    is_anom = (global_loss > global_threshold)
+    
+    scores = multi_scale_anomaly_score(x_img, pred)
+    global_loss = scores['global_mse']
+    local_max = scores['patch_16']
+    
+    is_anom_global = (global_loss > global_threshold)
+    is_anom_patch = (local_max > patch_threshold)
+    is_anom_ssim = (scores['ssim'] < 0.85)
+    
+    is_anom = is_anom_global or is_anom_patch or is_anom_ssim
+    
     return is_anom, global_loss, local_max
 
 # Top-level helpers (place anywhere above main())
@@ -418,12 +511,6 @@ def resolve_image_root() -> str:
 
     
 def augment_realistic(img: Image.Image, img_size: int) -> Image.Image:
-    fg = ImageOps.fit(img.convert("RGBA"), (target_size, target_size), method=Image.BICUBIC, centering=(0.5, 0.5))
-    bg = load_random_background(target_size).convert("RGBA")
-    mask = make_foreground_mask(fg)
-    bg.paste(fg, (0, 0), mask)
-    return bg.convert("RGB")
-
     target_size = AUG_SAVE_SIZE
 
     if ENABLE_BG_RANDOMIZATION:
@@ -490,7 +577,9 @@ def main():
     print(f"Total images: {num_files}")
 
     autoencoder = AnomalyDetector(img_size=IMG_SIZE, channels=CHANNELS, latent_channels=256)
-    autoencoder.compile(optimizer="adam", loss=mixed_loss)
+    
+    optimizer = tf.keras.optimizers.Adam(learning_rate=LEARNING_RATE, clipnorm=1.0)
+    autoencoder.compile(optimizer=optimizer, loss=mixed_loss)
 
     # Build submodules by calling once, so summary shows params
     _ = autoencoder(tf.zeros((1, IMG_SIZE, IMG_SIZE, CHANNELS), dtype=tf.float32))
@@ -501,7 +590,14 @@ def main():
     val_pairs_ds = val_img_ds.map(lambda x: (x, x))
 
     callbacks = [
-        tf.keras.callbacks.EarlyStopping(monitor="val_loss", patience=5, restore_best_weights=True)
+        tf.keras.callbacks.EarlyStopping(monitor="val_loss", patience=8, restore_best_weights=True, min_delta=1e-5),
+        tf.keras.callbacks.ReduceLROnPlateau(monitor="val_loss", factor=0.5, patience=4, min_lr=1e-7, verbose=1),
+        tf.keras.callbacks.ModelCheckpoint(
+            filepath=OUTPUT_MODEL.replace('.keras', '_best.keras'),
+            monitor='val_loss',
+            save_best_only=True,
+            verbose=1
+        )
     ]
     history = autoencoder.fit(
         train_pairs_ds,
@@ -531,11 +627,20 @@ def main():
     print(f"📈 Saved training history to {hist_path}")
 
     # Use a more lenient percentile via env (default 98)
-    anomaly_percentile = float(os.getenv("ANOMALY_PERCENTILE", "98"))
+    anomaly_percentile = float(os.getenv("ANOMALY_PERCENTILE", "95"))
     threshold = compute_threshold(autoencoder, val_img_ds, percentile=anomaly_percentile)
-    patch_threshold_16 = compute_threshold_patch(autoencoder, val_img_ds, percentile=98.0, patch_size=16)
-    patch_threshold_8 = compute_threshold_patch(autoencoder, val_img_ds, percentile=98.0, patch_size=8)
-    patch_threshold_32 = compute_threshold_patch(autoencoder, val_img_ds, percentile=98.0, patch_size=32)
+    patch_threshold_16 = compute_threshold_patch(autoencoder, val_img_ds, percentile=95.0, patch_size=16)
+    patch_threshold_8 = compute_threshold_patch(autoencoder, val_img_ds, percentile=95.0, patch_size=8)
+    patch_threshold_32 = compute_threshold_patch(autoencoder, val_img_ds, percentile=95.0, patch_size=32)
+    
+    print("\n" + "="*60)
+    print("📊 ANOMALY DETECTION THRESHOLDS")
+    print("="*60)
+    print(f"Global MSE (P{anomaly_percentile}): {threshold:.6f}")
+    print(f"Patch-8 (P95): {patch_threshold_8:.6f}")
+    print(f"Patch-16 (P95): {patch_threshold_16:.6f}")
+    print(f"Patch-32 (P95): {patch_threshold_32:.6f}")
+    print("="*60 + "\n")
 
 
 
