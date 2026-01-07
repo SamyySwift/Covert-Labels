@@ -58,63 +58,34 @@ Rules:
 """
 
 IMAGE_COMPARISON_PROMPT = """You are an expert counterfeit detection system. You will receive TWO images:
-1. REFERENCE IMAGE: The authentic product (this is the standard)
-2. TEST IMAGE: The product being verified (check this against the reference)
+1) REFERENCE IMAGE: authentic product
+2) TEST IMAGE: product to verify
 
-Compare the TEST image against the REFERENCE image and identify ALL discrepancies.
+Compare TEST vs REFERENCE conservatively.
 
-Analyze these specific aspects:
-1. TEXT ACCURACY:
-   - Spelling errors in product name, ingredients, or any text
-   - Font type, size, and weight differences
-   - Text alignment and spacing issues
-   - Character kerning inconsistencies
-   - Missing or extra text elements
+Ignore capture artifacts: lighting changes, reflections, shadows, camera angle/perspective, lens distortion, hand occlusions, background differences, minor glare, slight color shifts from white balance.
 
-2. PRINT QUALITY:
-   - Blurry or pixelated text
-   - Ink bleeding or smudging
-   - Color registration errors
-   - Print resolution differences
-   - Faded or oversaturated colors
+Only flag counterfeit when there is strong, camera-independent evidence.
 
-3. PACKAGING DESIGN:
-   - Logo placement and proportions
-   - Color accuracy (hue, saturation, brightness)
-   - Graphics quality and sharpness
-   - Barcode quality and placement
-   - Design element positioning
+Analyze:
+- TEXT: spelling changes, missing words, different wording, font family, weight, alignment
+- DESIGN: layout or logo changes, element position shifts, missing graphics
+- SECURITY: holograms/seals/certifications missing or altered; serials/batch codes invalid
+- PRINT QUALITY: extreme blur/bleed that would not arise from camera movement
+- PHYSICAL: material/finish fundamentally different
 
-4. PHYSICAL ATTRIBUTES:
-   - Material texture differences
-   - Finish quality (matte vs glossy)
-   - Edge quality and cutting precision
-   - Overall build quality
+Decision policy:
+- Default to authentic unless there are ≥2 discrepancies with severity in {critical, high} that are not attributable to capture artifacts
+- Counterfeit requires confidence_score ≥ 0.85
+- Minor differences only → authentic; confidence_score 0.75–0.9
+- Nearly identical → authentic; confidence_score > 0.9
 
-5. AUTHENTICITY INDICATORS:
-   - Security features (holograms, watermarks)
-   - Official seals or certifications
-   - Batch codes and serial numbers
-
-IMPORTANT:
-- If images are identical or nearly identical: is_authentic = true, confidence_score > 0.9
-- If minor differences exist: is_authentic = true, confidence_score 0.7-0.9
-- If significant differences exist: is_authentic = false, confidence_score < 0.7
-- List ALL discrepancies found, even minor ones
-
-Return a JSON object with this exact structure:
+Return JSON exactly:
 {
   "is_authentic": boolean,
-  "confidence_score": float (0.0 to 1.0),
-  "discrepancies": [
-    {
-      "category": "text|print_quality|design|physical|security",
-      "severity": "critical|high|medium|low",
-      "description": "detailed description",
-      "location": "where on the product"
-    }
-  ],
-  "overall_assessment": "brief summary"
+  "confidence_score": float,
+  "discrepancies": [{"category": "text|print_quality|design|physical|security", "severity": "critical|high|medium|low", "description": "...", "location": "..."}],
+  "overall_assessment": "..."
 }"""
 
 
@@ -130,6 +101,9 @@ def init_database():
             CREATE TABLE IF NOT EXISTS products (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 product_name TEXT NOT NULL,
+                canonical_name TEXT,
+                color TEXT,
+                volume_ml INTEGER DEFAULT 0,
                 image_path TEXT NOT NULL,
                 date_added TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 additional_metadata TEXT,
@@ -149,9 +123,15 @@ def init_database():
         ''')
         cursor.execute("PRAGMA table_info(products)")
         cols = [r[1] for r in cursor.fetchall()]
+        if 'canonical_name' not in cols:
+            cursor.execute("ALTER TABLE products ADD COLUMN canonical_name TEXT")
+        if 'color' not in cols:
+            cursor.execute("ALTER TABLE products ADD COLUMN color TEXT")
+        if 'volume_ml' not in cols:
+            cursor.execute("ALTER TABLE products ADD COLUMN volume_ml INTEGER DEFAULT 0")
         if 'variant_key' not in cols:
             cursor.execute("ALTER TABLE products ADD COLUMN variant_key TEXT DEFAULT 'default'")
-        cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_products_name_variant ON products(product_name, variant_key)")
+        cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_products_canonical_variant ON products(canonical_name, color, volume_ml)")
         conn.commit()
         conn.close()
     logger.info("Database initialized successfully")
@@ -321,23 +301,43 @@ def extract_product_name(image_path: str) -> str:
 
 
 def save_reference_product(product_name: str, image_path: str, metadata: Optional[Dict] = None, variant_key: str = "default"):
+    canon = normalize_product_name(product_name)
+    color, vol = parse_variant_fields(variant_key)
+    vol_int = int(vol[:-2]) if vol != 'default' and vol.endswith('ml') else 0
     with db_lock:
         conn = sqlite3.connect(app.config['DATABASE'])
         cursor = conn.cursor()
         try:
             cursor.execute(
-                'INSERT INTO products (product_name, image_path, additional_metadata, variant_key) VALUES (?, ?, ?, ?)',
-                (product_name, image_path, json.dumps(metadata or {}), variant_key)
+                'INSERT INTO products (product_name, canonical_name, color, volume_ml, image_path, additional_metadata, variant_key) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                (product_name, canon, color, vol_int, image_path, json.dumps(metadata or {}), variant_key)
             )
+            pid = cursor.lastrowid
+            extension = Path(image_path).suffix
+            new_filename = f"{pid}_{color or 'default'}_{vol if vol!='default' else '0ml'}{extension}"
+            new_path = os.path.join(app.config['UPLOAD_FOLDER'], new_filename)
+            if image_path != new_path:
+                try:
+                    os.rename(image_path, new_path)
+                except Exception:
+                    new_path = image_path
+            cursor.execute('UPDATE products SET image_path = ? WHERE id = ?', (new_path, pid))
             conn.commit()
-            logger.info(f"Saved reference product: {product_name} [{variant_key}]")
+            logger.info(f"Saved reference product: {product_name} [{color}_{vol_int}ml] id={pid}")
         except sqlite3.IntegrityError:
             cursor.execute(
-                'UPDATE products SET image_path = ?, additional_metadata = ? WHERE product_name = ? AND variant_key = ?',
-                (image_path, json.dumps(metadata or {}), product_name, variant_key)
+                'SELECT id, image_path FROM products WHERE canonical_name = ? AND color = ? AND volume_ml = ?',
+                (canon, color, vol_int)
             )
-            conn.commit()
-            logger.info(f"Updated reference product: {product_name} [{variant_key}]")
+            row = cursor.fetchone()
+            if row:
+                pid, old_path = row
+                cursor.execute(
+                    'UPDATE products SET image_path = ?, additional_metadata = ? WHERE id = ?',
+                    (image_path, json.dumps(metadata or {}), pid)
+                )
+                conn.commit()
+                logger.info(f"Updated reference product: {product_name} [{color}_{vol_int}ml] id={pid}")
         finally:
             conn.close()
 
@@ -346,30 +346,25 @@ def get_reference_image(product_name: str, variant_key: Optional[str] = None) ->
     with db_lock:
         conn = sqlite3.connect(app.config['DATABASE'])
         cursor = conn.cursor()
-        cursor.execute('SELECT product_name, variant_key, image_path FROM products')
-        rows = cursor.fetchall()
-        norm_pn = normalize_product_name(product_name)
-        target_color, target_vol = (None, None)
-        if variant_key:
-            c, v = parse_variant_fields(variant_key)
-            target_color, target_vol = c, v
-        exact = None
-        color_match = None
-        for pn, vk, ip in rows:
-            if normalize_product_name(pn) != norm_pn:
-                continue
-            c, v = parse_variant_fields(vk)
-            if target_color and target_vol and c == target_color and v == target_vol:
-                exact = ip
-                break
-            if target_color and c == target_color and color_match is None:
-                color_match = ip
-            if not target_color and vk == 'default':
-                color_match = ip
+        canon = normalize_product_name(product_name)
+        color, vol = parse_variant_fields(variant_key or '')
+        vol_int = int(vol[:-2]) if vol and vol.endswith('ml') and vol != 'default' else None
+        if vol_int is not None and color:
+            cursor.execute('SELECT image_path FROM products WHERE canonical_name = ? AND color = ? AND volume_ml = ? ORDER BY date_added DESC', (canon, color, vol_int))
+            row = cursor.fetchone()
+            if row:
+                conn.close()
+                return row[0]
+        if color:
+            cursor.execute('SELECT image_path FROM products WHERE canonical_name = ? AND color = ? ORDER BY date_added DESC', (canon, color))
+            row = cursor.fetchone()
+            if row:
+                conn.close()
+                return row[0]
+        cursor.execute('SELECT image_path FROM products WHERE canonical_name = ? ORDER BY date_added DESC', (canon,))
+        row = cursor.fetchone()
         conn.close()
-        if exact:
-            return exact
-        return color_match
+        return row[0] if row else None
 
 
 def validate_image(image_path: str) -> bool:
@@ -409,6 +404,17 @@ def perform_llm_comparison(reference_path: str, test_path: str) -> Dict:
             comparison_result['discrepancies'] = []
         if 'overall_assessment' not in comparison_result:
             comparison_result['overall_assessment'] = "Analysis completed"
+        
+        sev = [d.get('severity', '').lower() for d in comparison_result['discrepancies']]
+        severe_count = sum(1 for s in sev if s in ('critical','high'))
+        conf = float(comparison_result.get('confidence_score', 0.0) or 0.0)
+        is_auth = bool(comparison_result.get('is_authentic', False))
+        
+        if not is_auth:
+            if conf < 0.85 or severe_count < 2:
+                comparison_result['is_authentic'] = True
+                comparison_result['confidence_score'] = max(conf, 0.82)
+                comparison_result['overall_assessment'] = "Conservative pass: insufficient strong evidence of counterfeit"
         
         return comparison_result
     

@@ -12,3 +12,7 @@ other
 imgs
 GENUINE_IMAGE_DIR
 runtime
+temp_uploads
+reference_images
+product_auth.db
+product_auth.log
